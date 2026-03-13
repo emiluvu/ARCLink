@@ -1,0 +1,21 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="220" fill="white"/>
+
+  <g fill="#111111">
+    <path d="M512 178C414 178 334 255 323 352H701C690 255 610 178 512 178Z"/>
+    <path d="M295 392H729C742 392 752 402 752 415V463C752 476 742 486 729 486H295C282 486 272 476 272 463V415C272 402 282 392 295 392Z"/>
+    <rect x="358" y="486" width="56" height="104" rx="18"/>
+    <rect x="610" y="486" width="56" height="104" rx="18"/>
+    <rect x="480" y="332" width="64" height="64" rx="20"/>
+  </g>
+
+  <g fill="#111111">
+    <rect x="654" y="560" width="34" height="210" rx="10"/>
+    <rect x="548" y="582" width="290" height="28" rx="10"/>
+    <rect x="788" y="510" width="26" height="72" rx="10"/>
+    <rect x="770" y="610" width="18" height="138" rx="9" transform="rotate(23 770 610)"/>
+    <path d="M566 610H602L640 690H604L566 610Z"/>
+    <path d="M780 748C780 775 757 798 730 798H678V764H730C738 764 746 757 746 748C746 740 738 732 730 732H712V698H730C757 698 780 721 780 748Z"/>
+    <rect x="478" y="756" width="366" height="34" rx="12"/>
+  </g>
+</svg>
