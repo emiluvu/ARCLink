@@ -25,6 +25,7 @@
 		45D584C42F6006C500901DBF /* WorkerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerViews.swift; sourceTree = "<group>"; };
 		45D584C72F600C5C00901DBF /* SectionParticipantViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionParticipantViews.swift; sourceTree = "<group>"; };
 		45E0AF322F5FB9FF00E75C28 /* ARCLink.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ARCLink.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F67393CE2F63A92B00E5508A /* ARCLink-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "ARCLink-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -49,6 +50,7 @@
 		45E0AF292F5FB9FF00E75C28 = {
 			isa = PBXGroup;
 			children = (
+				F67393CE2F63A92B00E5508A /* ARCLink-Info.plist */,
 				45D584BB2F6004F400901DBF /* AppModels.swift */,
 				45D584BC2F6004F400901DBF /* AppSupport.swift */,
 				45D584BD2F6004F400901DBF /* AuthViews.swift */,
@@ -285,8 +287,11 @@
 				DEVELOPMENT_TEAM = 67826H52KV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ARCLink-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ARCLink;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Connect to visor";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Connect to visor";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -320,8 +325,11 @@
 				DEVELOPMENT_TEAM = 67826H52KV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ARCLink-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = ARCLink;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Connect to visor";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Connect to visor";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
