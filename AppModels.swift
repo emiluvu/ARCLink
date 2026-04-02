@@ -693,6 +693,57 @@ struct CrewMessage: Identifiable {
     let time: String
 }
 
+struct ARCVisorBluetoothManager {
+    enum ConnectionState {
+        case idle
+        case scanning
+        case discovering
+        case connecting
+        case connected
+        case failed
+        case bluetoothUnavailable
+    }
+
+    var connectionState: ConnectionState = .idle
+    var latestPayload = ""
+
+    var isConnected: Bool {
+        connectionState == .connected
+    }
+
+    var liveSectionSyncEnabled: Bool {
+        isConnected
+    }
+
+    var taskOverlaysAvailable: Bool {
+        isConnected
+    }
+
+    var statusText: String {
+        switch connectionState {
+        case .idle:
+            return "Ready to connect"
+        case .scanning:
+            return "Scanning for ARCVisor"
+        case .discovering:
+            return "ARCVisor discovered"
+        case .connecting:
+            return "Connecting to ARCVisor"
+        case .connected:
+            return "ARCVisor connected"
+        case .failed:
+            return "Connection failed"
+        case .bluetoothUnavailable:
+            return "Bluetooth unavailable"
+        }
+    }
+
+    mutating func connect() {
+        connectionState = .connected
+        latestPayload = "ARCVisor paired. Section sync and task overlays are ready."
+    }
+}
+
 struct RegisteredProfile: Identifiable, Codable {
     let id: UUID
     var accountID: String
