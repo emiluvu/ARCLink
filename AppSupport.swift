@@ -1,4 +1,4 @@
-//
+\//
 //  AppSupport.swift
 //  test
 //
@@ -703,7 +703,9 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Connection": "Conexión",
         "Device discovery ready": "Detección de dispositivo lista",
         "Live section sync enabled": "Sincronización en vivo de la sección activada",
+        "Live section sync unavailable": "Sincronización en vivo de la sección no disponible",
         "Task overlays available": "Superposiciones de tareas disponibles",
+        "Task overlays unavailable": "Superposiciones de tareas no disponibles",
         "What ARCVisor Will Do": "Lo que hará ARCVisor",
         "Show section tasks, crew locations, and pinned updates in an AR visor view.": "Mostrar tareas de la sección, ubicaciones del equipo y actualizaciones fijadas en una vista de visor AR.",
         "Pull worker assignments and on-site status directly from ARCLink.": "Obtener asignaciones de cuadrillas y estado en obra directamente desde ARCLink.",
