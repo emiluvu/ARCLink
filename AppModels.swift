@@ -14,7 +14,7 @@ enum AppRole: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .manager:
-            return "Manager"
+            return "Crew Lead"
         case .worker:
             return "Crew"
         }

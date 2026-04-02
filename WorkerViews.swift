@@ -29,6 +29,7 @@ struct WorkerHomeView: View {
     let sectionName: String
     let sectionCode: String
     let onSignOut: () -> Void
+    @Environment(BluetoothManager.self) private var bluetoothManager
     @AppStorage("managerSectionsJSON") private var managerSectionsRaw = ""
     @AppStorage("workerPrivateTaskNotesJSON") private var workerPrivateTaskNotesRaw = ""
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
@@ -36,7 +37,7 @@ struct WorkerHomeView: View {
 
     private let updates: [CrewMessage] = [
         CrewMessage(sender: "Foreman", text: "Meet at Gate C for safety brief.", time: "6:45 AM"),
-        CrewMessage(sender: "Site Manager", text: "Concrete delivery moved to 10:30 AM.", time: "7:20 AM"),
+        CrewMessage(sender: "Site Crew Lead", text: "Concrete delivery moved to 10:30 AM.", time: "7:20 AM"),
         CrewMessage(sender: "Safety Lead", text: "High-wind alert after 2 PM.", time: "8:05 AM")
     ]
 
@@ -112,6 +113,18 @@ struct WorkerHomeView: View {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
     }
 
+    private var arcVisorPayloadContext: ARCVisorPayloadContext {
+        ARCVisorPayloadContext(
+            userName: abbreviatedDisplayName(profileName),
+            roleTitle: "Crew",
+            profileAccountID: "",
+            profilePhoneNumber: profilePhoneNumber,
+            managerSectionsRaw: managerSectionsRaw,
+            assignedSectionCodesRaw: "",
+            managerPersonalTodosRaw: ""
+        )
+    }
+
     var body: some View {
         NavigationView {
             List {
@@ -130,6 +143,7 @@ struct WorkerHomeView: View {
                         showARCVisor = true
                     } label: {
                         Label(localized("Open ARCVisor", language), systemImage: "visionpro")
+                            .foregroundStyle(Color.arcAccentOrange)
                     }
                     .buttonStyle(.plain)
                 }
@@ -374,7 +388,8 @@ struct WorkerHomeView: View {
         }
         .sheet(isPresented: $showARCVisor) {
             NavigationView {
-                ARCVisorHubView(userName: abbreviatedDisplayName(profileName), roleTitle: "Crew")
+                ARCVisorHubView(payloadContext: arcVisorPayloadContext)
+                    .environment(bluetoothManager)
             }
             .navigationViewStyle(.stack)
         }
@@ -579,70 +594,265 @@ struct WorkerHomeView: View {
 }
 
 public struct ARCVisorHubView: View {
-    let userName: String
-    let roleTitle: String
+    let payloadContext: ARCVisorPayloadContext
+    @Environment(BluetoothManager.self) private var bluetoothManager
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
-    @State private var bluetoothManager = BluetoothManager()
-    
+    @State private var bluetoothStatusMessage = ""
+
     private var language: AppLanguage {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
     }
-    
+
+    private var signedInDisplayName: String {
+        payloadContext.userName.isEmpty
+            ? localized(payloadContext.roleTitle, language)
+            : payloadContext.userName
+    }
+
+    private var connectionStatusSymbol: String {
+        bluetoothManager.isConnected() ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right"
+    }
+
+    private var connectionStatusColor: Color {
+        bluetoothManager.isConnected() ? .green : .secondary
+    }
+
     public var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("ARCVisor")
                         .font(.largeTitle.weight(.bold))
-                    Text(localized("Augmented reality visor linked through ARCLink.", language))
+                    Text(localized("Augmented Reality Construction Visor", language))
                         .foregroundStyle(.secondary)
-                    Text("\(localized("Signed in as", language)) \(userName.isEmpty ? localized(roleTitle, language) : userName)")
+                    Text("\(localized("Signed in as", language)) \(signedInDisplayName)")
                         .font(.subheadline.weight(.semibold))
                 }
                 .padding(.vertical, 6)
             }
-            
+
             Section(localized("Connection", language)) {
                 Label(
                     bluetoothManager.isConnected() ? "Connected!" : "Not Connected",
                     systemImage: connectionStatusSymbol
                 ).foregroundStyle(connectionStatusColor)
-                
+
                 if bluetoothManager.isConnected() {
                     let latestPayload = bluetoothManager.deviceDataString
-                    
+
                     if let payload = latestPayload {
                         Text(payload)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                if !bluetoothStatusMessage.isEmpty {
+                    Text(bluetoothStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(localized("Send Snapshot to Pi", language)) {
+                    sendSnapshotToARCVisor()
+                }
+                .disabled(!bluetoothManager.isConnected())
             }
-            
+
             Section(localized("What ARCVisor Will Do", language)) {
                 Text(localized("Show section tasks, crew locations, and pinned updates in an AR visor view.", language))
                 Text(localized("Pull crew assignments and on-site status directly from ARCLink.", language))
                 Text(localized("Support field walk-throughs, safety overlays, and visual markups.", language))
             }
-            .navigationTitle("ARCVisor")
-            .listStyle(.insetGrouped)
-        }
-        
-        var connectionStatusSymbol: String {
-            if bluetoothManager.isConnected() {
-                return "checkmark.circle.fill"
-            } else {
-                return "dot.radiowaves.left.and.right"
+
+            Section(localized("Payload Preview", language)) {
+                NavigationLink {
+                    ARCVisorPayloadPreviewView(
+                        payloadText: arcVisorPayloadPreview,
+                        language: language
+                    )
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(localized("Outgoing Device Payload", language))
+                            .font(.headline)
+                        Text(localized("Review the live JSON currently being prepared for the Raspberry Pi.", language))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                NavigationLink {
+                    ARCVisorDisplayPreviewView(
+                        payload: arcVisorPayloadModel,
+                        language: language
+                    )
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(localized("Display Preview", language))
+                            .font(.headline)
+                        Text(localized("Simple micro-OLED mock using the same live payload data.", language))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section(localized("Connection", language)) {
+                Text(localized("ARCVisor connects automatically when the device is available.", language))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button(localized("Resend Snapshot to Pi", language)) {
+                    sendSnapshotToARCVisor()
+                }
+                .disabled(!bluetoothManager.isConnected())
+
+                Button(localized("Read Device Response", language)) {
+                    readFromARCVisor()
+                }
+                .disabled(!bluetoothManager.isConnected())
             }
         }
-        
-        var connectionStatusColor: Color {
-            if bluetoothManager.isConnected() {
-                return .green
-            } else {
-                return .secondary
-            }
+        .navigationTitle("ARCVisor")
+        .listStyle(.insetGrouped)
+    }
+
+    private func sendSnapshotToARCVisor() {
+        do {
+            let payload = try currentARCVisorPayloadJSON()
+            try bluetoothManager.writeString(payload)
+            bluetoothStatusMessage = "Sent JSON snapshot to the Raspberry Pi over Bluetooth (\(payload.utf8.count) bytes)."
+        } catch BluetoothError.noDevice {
+            bluetoothStatusMessage = "No Raspberry Pi Bluetooth device connected."
+        } catch BluetoothError.noCharacteristic {
+            bluetoothStatusMessage = "Connected Raspberry Pi is missing the ARCVisor data characteristic."
+        } catch BluetoothError.invalidArgument {
+            bluetoothStatusMessage = "Could not encode ARCVisor payload."
+        } catch {
+            bluetoothStatusMessage = "Failed to send the JSON snapshot to the Raspberry Pi."
         }
+    }
+
+    private func readFromARCVisor() {
+        do {
+            try bluetoothManager.read()
+            bluetoothStatusMessage = "Requested latest data from ARCVisor."
+        } catch BluetoothError.noDevice {
+            bluetoothStatusMessage = "No ARCVisor device connected."
+        } catch BluetoothError.noCharacteristic {
+            bluetoothStatusMessage = "Connected device is missing the ARCVisor data characteristic."
+        } catch {
+            bluetoothStatusMessage = "Failed to read data from ARCVisor."
+        }
+    }
+
+    private func currentARCVisorPayloadJSON() throws -> String {
+        try encodedARCVisorPayload(from: payloadContext)
+    }
+
+    private var arcVisorPayloadPreview: String {
+        (try? currentARCVisorPayloadJSON()) ?? localized("Payload unavailable.", language)
+    }
+
+    private var arcVisorPayloadModel: ARCVisorPayload {
+        arcVisorPayload(from: payloadContext)
+    }
+}
+
+private struct ARCVisorPayloadPreviewView: View {
+    let payloadText: String
+    let language: AppLanguage
+    @State private var didCopyPayload = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    UIPasteboard.general.string = payloadText
+                    didCopyPayload = true
+                } label: {
+                    Label(localized("Copy JSON Payload", language), systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.borderedProminent)
+
+                if didCopyPayload {
+                    Text(localized("Payload copied to clipboard.", language))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(payloadText)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding()
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle(localized("Outgoing Device Payload", language))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ARCVisorDisplayPreviewView: View {
+    let payload: ARCVisorPayload
+    let language: AppLanguage
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("ARCV")
+                        .font(.caption.weight(.bold))
+                    Spacer()
+                    Text(payload.userName.isEmpty ? "--" : payload.userName)
+                        .lineLimit(1)
+                }
+
+                Divider()
+                    .overlay(Color.white.opacity(0.7))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(localized("Top To-Dos", language))
+                        .font(.caption.weight(.bold))
+                    ForEach(Array(payload.topTodos.prefix(3).enumerated()), id: \.offset) { index, todo in
+                        Text("\(index + 1). \(todo.priority.prefix(1)) \(todo.title)")
+                            .lineLimit(1)
+                    }
+                    if payload.topTodos.isEmpty {
+                        Text("--")
+                    }
+                }
+
+                Divider()
+                    .overlay(Color.white.opacity(0.7))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(localized("Notifications", language))
+                        .font(.caption.weight(.bold))
+                    ForEach(Array(payload.notifications.prefix(1).enumerated()), id: \.offset) { _, notification in
+                        Text("• \(notification.message)")
+                            .lineLimit(1)
+                    }
+                    if payload.notifications.isEmpty {
+                        Text("--")
+                    }
+                }
+            }
+            .font(.system(size: 14, weight: .medium, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
+            .padding()
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle(localized("Display Preview", language))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -752,7 +962,7 @@ public struct ARCVisorHubView: View {
                         } label: {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 26))
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(Color.arcAccentOrange)
                         }
                         
                         TextField(localized("Type a message", language), text: $newMessageText)
@@ -767,14 +977,14 @@ public struct ARCVisorHubView: View {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 30))
                         }
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color.arcAccentOrange)
                         .disabled(newMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(Color(uiColor: .systemBackground))
                 } else {
-                    Text(localized("This chat is read only. Your manager can enable write access in chat settings.", language))
+                    Text(localized("This chat is read only. Your crew lead can enable write access in chat settings.", language))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)
@@ -1263,14 +1473,14 @@ public struct WorkerTaskDetailView: View {
                     Label("Verified", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                 } else if task.requiresAcknowledgement && completedState {
-                    Label("Waiting for manager verification", systemImage: "clock.badge.checkmark")
+                    Label("Waiting for crew lead verification", systemImage: "clock.badge.checkmark")
                         .foregroundStyle(.secondary)
                 }
             }
             
-            Section("Manager Notes") {
+            Section("Crew Lead Notes") {
                 if task.managerNotes.isEmpty {
-                    Text("No manager notes yet.")
+                    Text("No crew lead notes yet.")
                         .foregroundStyle(.secondary)
                 } else {
                     Text(task.managerNotes)
@@ -1371,14 +1581,14 @@ struct WorkerPersonalTodoDetailView: View {
                     Label(localized("Verified", language), systemImage: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                 } else if todo.requiresAcknowledgement && completedState {
-                    Label(localized("Waiting for manager verification", language), systemImage: "clock.badge.checkmark")
+                    Label(localized("Waiting for crew lead verification", language), systemImage: "clock.badge.checkmark")
                         .foregroundStyle(.secondary)
                 }
             }
             
-            Section(localized("Manager Notes", language)) {
+            Section(localized("Crew Lead Notes", language)) {
                 if todo.managerNotes.isEmpty {
-                    Text(localized("No manager notes yet.", language))
+                    Text(localized("No crew lead notes yet.", language))
                         .foregroundStyle(.secondary)
                 } else {
                     Text(todo.managerNotes)

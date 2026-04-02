@@ -42,6 +42,7 @@ struct ManagerHomeView: View {
     let profileName: String
     let onSignOut: () -> Void
 
+    @Environment(BluetoothManager.self) private var bluetoothManager
     @AppStorage("managerSectionsJSON") private var managerSectionsRaw = ""
     @AppStorage("managerAssignedSectionCodesJSON") private var assignedSectionCodesRaw = ""
     @AppStorage("managerPersonalTodosJSON") private var managerPersonalTodosRaw = ""
@@ -77,6 +78,18 @@ struct ManagerHomeView: View {
 
     private var managerCrewNicknames: [String: String] {
         decodeManagerCrewNicknames(from: managerCrewNicknamesRaw)
+    }
+
+    private var arcVisorPayloadContext: ARCVisorPayloadContext {
+        ARCVisorPayloadContext(
+            userName: abbreviatedDisplayName(profileName),
+            roleTitle: "Crew Lead",
+            profileAccountID: profileAccountID,
+            profilePhoneNumber: profilePhoneNumber,
+            managerSectionsRaw: managerSectionsRaw,
+            assignedSectionCodesRaw: assignedSectionCodesRaw,
+            managerPersonalTodosRaw: managerPersonalTodosRaw
+        )
     }
 
     private var allSections: [ManagerSection] {
@@ -190,237 +203,12 @@ struct ManagerHomeView: View {
     var body: some View {
         NavigationView {
             List {
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("ARCLink")
-                            .font(.title2.weight(.semibold))
-                        Text(greetingText(name: profileName.isEmpty ? localized("Manager", language) : abbreviatedDisplayName(profileName), language: language))
-                            .font(.largeTitle.weight(.bold))
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                Section {
-                    Button {
-                        showARCVisor = true
-                    } label: {
-                        Label(localized("Open ARCVisor", language), systemImage: "visionpro")
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Section {
-                    DisclosureGroup(isExpanded: $isOverallTodoExpanded) {
-                        if leadershipTodoItems.isEmpty {
-                            Text(localized("No leadership to-dos assigned yet.", language))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(leadershipTodoItems) { item in
-                                HStack(alignment: .top, spacing: 12) {
-                                    Button {
-                                        toggleOverallTodoCompletion(item)
-                                    } label: {
-                                        Image(systemName: overallTodoStatusImage(for: item))
-                                            .font(.title3)
-                                            .foregroundStyle(overallTodoStatusColor(for: item))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .padding(.top, 2)
-
-                                    switch item.itemType {
-                                    case .sectionTask:
-                                        if let task = overallSectionTask(for: item) {
-                                            NavigationLink {
-                                                WorkerTaskDetailView(
-                                                    task: task,
-                                                    isCompleted: item.requiresAcknowledgement ? task.doneMemberIDs.contains(item.memberID ?? UUID()) : item.isCompleted,
-                                                    isVerified: item.isCompleted,
-                                                    privateNote: overallPrivateNote(for: item),
-                                                    onToggleCompleted: { isDone in
-                                                        toggleOverallTodoCompletion(to: isDone, item: item)
-                                                    },
-                                                    onSavePrivateNote: { note in
-                                                        setOverallPrivateNote(note, for: item)
-                                                    }
-                                                )
-                                            } label: {
-                                                overallTodoRowContent(item)
-                                            }
-                                        } else {
-                                            overallTodoRowContent(item)
-                                        }
-                                    case .personalTodo, .managerTodo:
-                                        if let todo = overallMemberTodo(for: item) {
-                                            NavigationLink {
-                                                WorkerPersonalTodoDetailView(
-                                                    todo: todo,
-                                                    privateNote: overallPrivateNote(for: item),
-                                                    onToggleCompleted: { isDone in
-                                                        toggleOverallTodoCompletion(to: isDone, item: item)
-                                                    },
-                                                    onSavePrivateNote: { note in
-                                                        setOverallPrivateNote(note, for: item)
-                                                    }
-                                                )
-                                            } label: {
-                                                overallTodoRowContent(item)
-                                            }
-                                        } else {
-                                            overallTodoRowContent(item)
-                                        }
-                                    }
-                                }
-                                .padding(.vertical, 2)
-                            }
-                        }
-                    } label: {
-                        Text(localized("Overall To-Do List", language))
-                    }
-                }
-
-                Section(localized("Managed Sections", language)) {
-                    if managerSections.isEmpty {
-                        Text(localized("No managed sections yet. Tap + to create one.", language))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach($managerSections) { $section in
-                            let childSections = subsections(for: section.id)
-                            DisclosureGroup(
-                                isExpanded: Binding(
-                                    get: { expandedManagedSectionIDs.contains(section.id) },
-                                    set: { isExpanded in
-                                        if isExpanded {
-                                            expandedManagedSectionIDs.insert(section.id)
-                                        } else {
-                                            expandedManagedSectionIDs.remove(section.id)
-                                        }
-                                    }
-                                )
-                            ) {
-                                if childSections.isEmpty {
-                                    Text(localized("No subsections yet.", language))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    ForEach(childSections) { subsection in
-                                        NavigationLink {
-                                            ManagedSectionHostView(sectionID: subsection.id)
-                                        } label: {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                HStack {
-                                                    Text(subsection.name)
-                                                        .font(.subheadline.weight(.semibold))
-                                                    Spacer()
-                                                    Label(subsection.codeWord, systemImage: "link")
-                                                        .font(.caption.weight(.semibold))
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                                Text("\(subsection.members.count) crews • \(subsection.groupChats.count) group chats")
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .padding(.vertical, 2)
-                                        }
-                                    }
-                                }
-                            } label: {
-                                NavigationLink {
-                                    ManagerSectionDashboardView(
-                                        section: $section,
-                                        onSave: saveSections
-                                    )
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        HStack {
-                                            Text(section.name)
-                                                .font(.headline)
-                                            Spacer()
-                                            Label(section.codeWord, systemImage: "key.fill")
-                                                .font(.caption.weight(.semibold))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Text("\(section.members.count) crews • \(section.groupChats.count) group chats")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .padding(.vertical, 2)
-                                }
-                            }
-                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                Button("Rename") {
-                                    renameSectionID = section.id
-                                    renameSectionName = section.name
-                                    showRenameSectionSheet = true
-                                }
-                                .tint(.blue)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button("Delete", role: .destructive) {
-                                    deleteSection(id: section.id)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Section {
-                    if leadershipSections.isEmpty {
-                        Text(localized("No leadership sections joined yet.", language))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(leadershipSections) { section in
-                            NavigationLink {
-                                ManagerAssignedSectionDashboardView(
-                                    profileName: profileName,
-                                    profileAccountID: profileAccountID,
-                                    profilePhoneNumber: profilePhoneNumber,
-                                    sectionCode: section.codeWord
-                                )
-                            } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack {
-                                        Text(section.name)
-                                            .font(.headline)
-                                        Spacer()
-                                        Label(section.codeWord, systemImage: "link.badge.plus")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text("\(section.members.count) crews • \(section.groupChats.count) group chats")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(.vertical, 2)
-                            }
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text(localized("Leadership Sections", language))
-                        Spacer()
-                        Button {
-                            joinSectionStatusMessage = ""
-                            joinSectionCode = ""
-                            showJoinSectionSheet = true
-                        } label: {
-                            Image(systemName: "plus.circle")
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                Section {
-                    NavigationLink {
-                        ManagerProfileDetailView(
-                            profileName: profileName,
-                            profileAccountID: profileAccountID,
-                            profilePhoneNumber: profilePhoneNumber,
-                            profileEmail: profileEmail
-                        )
-                    } label: {
-                        Label(localized("My Profile", language), systemImage: "person.crop.circle")
-                    }
-                }
+                managerHeaderSection
+                managerARCVisorSection
+                managerOverallTodoSection
+                managerManagedSectionsSection
+                managerLeadershipSectionsSection
+                managerProfileSection
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -562,7 +350,7 @@ struct ManagerHomeView: View {
                                 .frame(minHeight: 90)
                                 .overlay(alignment: .topLeading) {
                                     if newManagerTodoNotes.isEmpty {
-                                        Text(localized("Manager notes (optional)", language))
+                                        Text(localized("Crew Lead notes (optional)", language))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                             .padding(.top, 8)
@@ -600,7 +388,8 @@ struct ManagerHomeView: View {
         }
         .sheet(isPresented: $showARCVisor) {
             NavigationView {
-                ARCVisorHubView(userName: abbreviatedDisplayName(profileName), roleTitle: "Manager")
+                ARCVisorHubView(payloadContext: arcVisorPayloadContext)
+                    .environment(bluetoothManager)
             }
             .navigationViewStyle(.stack)
         }
@@ -611,6 +400,253 @@ struct ManagerHomeView: View {
         }
         .onChange(of: managerSectionsRaw) { newValue in
             managerSections = ownedSections(from: newValue)
+        }
+    }
+
+    private var managerHeaderSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("ARCLink")
+                    .font(.title2.weight(.semibold))
+                Text(greetingText(name: profileName.isEmpty ? localized("Crew Lead", language) : abbreviatedDisplayName(profileName), language: language))
+                    .font(.largeTitle.weight(.bold))
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var managerARCVisorSection: some View {
+        Section {
+            Button {
+                showARCVisor = true
+            } label: {
+                Label(localized("Open ARCVisor", language), systemImage: "visionpro")
+                    .foregroundStyle(Color.arcAccentOrange)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var managerOverallTodoSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $isOverallTodoExpanded) {
+                if leadershipTodoItems.isEmpty {
+                    Text(localized("No leadership to-dos assigned yet.", language))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(leadershipTodoItems) { item in
+                        HStack(alignment: .top, spacing: 12) {
+                            Button {
+                                toggleOverallTodoCompletion(item)
+                            } label: {
+                                Image(systemName: overallTodoStatusImage(for: item))
+                                    .font(.title3)
+                                    .foregroundStyle(overallTodoStatusColor(for: item))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 2)
+
+                            switch item.itemType {
+                            case .sectionTask:
+                                if let task = overallSectionTask(for: item) {
+                                    NavigationLink {
+                                        WorkerTaskDetailView(
+                                            task: task,
+                                            isCompleted: item.requiresAcknowledgement ? task.doneMemberIDs.contains(item.memberID ?? UUID()) : item.isCompleted,
+                                            isVerified: item.isCompleted,
+                                            privateNote: overallPrivateNote(for: item),
+                                            onToggleCompleted: { isDone in
+                                                toggleOverallTodoCompletion(to: isDone, item: item)
+                                            },
+                                            onSavePrivateNote: { note in
+                                                setOverallPrivateNote(note, for: item)
+                                            }
+                                        )
+                                    } label: {
+                                        overallTodoRowContent(item)
+                                    }
+                                } else {
+                                    overallTodoRowContent(item)
+                                }
+                            case .personalTodo, .managerTodo:
+                                if let todo = overallMemberTodo(for: item) {
+                                    NavigationLink {
+                                        WorkerPersonalTodoDetailView(
+                                            todo: todo,
+                                            privateNote: overallPrivateNote(for: item),
+                                            onToggleCompleted: { isDone in
+                                                toggleOverallTodoCompletion(to: isDone, item: item)
+                                            },
+                                            onSavePrivateNote: { note in
+                                                setOverallPrivateNote(note, for: item)
+                                            }
+                                        )
+                                    } label: {
+                                        overallTodoRowContent(item)
+                                    }
+                                } else {
+                                    overallTodoRowContent(item)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            } label: {
+                Text(localized("Overall To-Do List", language))
+            }
+        }
+    }
+
+    private var managerManagedSectionsSection: some View {
+        Section(localized("Managed Sections", language)) {
+            if managerSections.isEmpty {
+                Text(localized("No managed sections yet. Tap + to create one.", language))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach($managerSections) { $section in
+                    managedSectionRow($section)
+                }
+            }
+        }
+    }
+
+    private var managerLeadershipSectionsSection: some View {
+        Section {
+            if leadershipSections.isEmpty {
+                Text(localized("No leadership sections joined yet.", language))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(leadershipSections) { section in
+                    NavigationLink {
+                        ManagerAssignedSectionDashboardView(
+                            profileName: profileName,
+                            profileAccountID: profileAccountID,
+                            profilePhoneNumber: profilePhoneNumber,
+                            sectionCode: section.codeWord
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(section.name)
+                                    .font(.headline)
+                                Spacer()
+                                Label(section.codeWord, systemImage: "link.badge.plus")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("\(section.members.count) crews • \(section.groupChats.count) group chats")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        } header: {
+            HStack {
+                Text(localized("Leadership Sections", language))
+                Spacer()
+                Button {
+                    joinSectionStatusMessage = ""
+                    joinSectionCode = ""
+                    showJoinSectionSheet = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var managerProfileSection: some View {
+        Section {
+            NavigationLink {
+                ManagerProfileDetailView(
+                    profileName: profileName,
+                    profileAccountID: profileAccountID,
+                    profilePhoneNumber: profilePhoneNumber,
+                    profileEmail: profileEmail
+                )
+            } label: {
+                Label(localized("My Profile", language), systemImage: "person.crop.circle")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func managedSectionRow(_ section: Binding<ManagerSection>) -> some View {
+        let childSections = subsections(for: section.wrappedValue.id)
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { expandedManagedSectionIDs.contains(section.wrappedValue.id) },
+                set: { isExpanded in
+                    if isExpanded {
+                        expandedManagedSectionIDs.insert(section.wrappedValue.id)
+                    } else {
+                        expandedManagedSectionIDs.remove(section.wrappedValue.id)
+                    }
+                }
+            )
+        ) {
+            if childSections.isEmpty {
+                Text(localized("No subsections yet.", language))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(childSections) { subsection in
+                    NavigationLink {
+                        ManagedSectionHostView(sectionID: subsection.id)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(subsection.name)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Label(subsection.codeWord, systemImage: "link")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("\(subsection.members.count) crews • \(subsection.groupChats.count) group chats")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        } label: {
+            NavigationLink {
+                ManagedSectionHostView(sectionID: section.wrappedValue.id)
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(section.wrappedValue.name)
+                            .font(.headline)
+                        Spacer()
+                        Label(section.wrappedValue.codeWord, systemImage: "key.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("\(section.wrappedValue.members.count) crews • \(section.wrappedValue.groupChats.count) group chats")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button("Rename") {
+                renameSectionID = section.wrappedValue.id
+                renameSectionName = section.wrappedValue.name
+                showRenameSectionSheet = true
+            }
+            .tint(Color.arcAccentOrange)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button("Delete", role: .destructive) {
+                deleteSection(id: section.wrappedValue.id)
+            }
         }
     }
 
@@ -712,7 +748,7 @@ struct ManagerHomeView: View {
         if let memberIndex = updatedSections[sectionIndex].members.firstIndex(where: {
             (!profileAccountID.isEmpty && $0.accountID == profileAccountID) || $0.phoneNumber == profilePhoneNumber
         }) {
-            updatedSections[sectionIndex].members[memberIndex].name = profileName.isEmpty ? localized("Manager", language) : profileName
+            updatedSections[sectionIndex].members[memberIndex].name = profileName.isEmpty ? localized("Crew Lead", language) : profileName
             updatedSections[sectionIndex].members[memberIndex].phoneNumber = profilePhoneNumber
             updatedSections[sectionIndex].members[memberIndex].accountID = profileAccountID.isEmpty ? nil : profileAccountID
             updatedSections[sectionIndex].members[memberIndex].role = .foreman
@@ -720,7 +756,7 @@ struct ManagerHomeView: View {
             updatedSections[sectionIndex].members.append(
                 SectionMember(
                     accountID: profileAccountID.isEmpty ? nil : profileAccountID,
-                    name: profileName.isEmpty ? localized("Manager", language) : profileName,
+                    name: profileName.isEmpty ? localized("Crew Lead", language) : profileName,
                     phoneNumber: profilePhoneNumber,
                     role: .foreman,
                     isOnSite: false
@@ -937,8 +973,8 @@ struct ManagerProfileDetailView: View {
     var body: some View {
         List {
             Section(localized("Profile", language)) {
-                Text(profileName.isEmpty ? "Manager" : profileName)
-                Text(localized("Role: Manager", language))
+                Text(profileName.isEmpty ? "Crew Lead" : profileName)
+                Text(localized("Role: Crew Lead", language))
                     .foregroundStyle(.secondary)
                 if !profileAccountID.isEmpty {
                     Text(localized("Account ID", language) + ": \(profileAccountID)")
@@ -1072,10 +1108,15 @@ struct ManagerProfileDetailView: View {
 }
 
 struct ManagedSectionHostView: View {
+    private struct SelectedGroupChatRoute: Identifiable {
+        let id: UUID
+    }
+
     let sectionID: UUID
 
     @AppStorage("managerSectionsJSON") private var managerSectionsRaw = ""
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
+    @State private var selectedGroupChatRoute: SelectedGroupChatRoute?
 
     private var language: AppLanguage {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
@@ -1083,10 +1124,50 @@ struct ManagedSectionHostView: View {
 
     var body: some View {
         if let sectionBinding {
-            ManagerSectionDashboardView(section: sectionBinding, onSave: { })
+            sectionDashboardContent(sectionBinding)
         } else {
             Text(localized("Section not found.", language))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionDashboardContent(_ sectionBinding: Binding<ManagerSection>) -> some View {
+        ManagerSectionDashboardView(
+            section: sectionBinding,
+            onSave: { },
+            onOpenGroupChat: { selectedGroupChatRoute = SelectedGroupChatRoute(id: $0) }
+        )
+        .sheet(
+            item: Binding(
+                get: { selectedGroupChatRoute },
+                set: { selectedGroupChatRoute = $0 }
+            )
+        ) { route in
+            if let chatBinding = groupChatBinding(for: route.id, section: sectionBinding.wrappedValue) {
+                NavigationView {
+                    SectionGroupChatDetailView(
+                        chat: chatBinding,
+                        members: sectionBinding.wrappedValue.members,
+                        onSave: { }
+                    )
+                }
+                .navigationViewStyle(.stack)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func groupChatDestination(_ sectionBinding: Binding<ManagerSection>) -> some View {
+        if let selectedGroupChatRoute,
+           let chatBinding = groupChatBinding(for: selectedGroupChatRoute.id, section: sectionBinding.wrappedValue) {
+            SectionGroupChatDetailView(
+                chat: chatBinding,
+                members: sectionBinding.wrappedValue.members,
+                onSave: { }
+            )
+        } else {
+            EmptyView()
         }
     }
 
@@ -1106,6 +1187,27 @@ struct ManagedSectionHostView: View {
             }
         )
     }
+
+    private func groupChatBinding(for chatID: UUID, section: ManagerSection) -> Binding<SectionGroupChat>? {
+        guard let index = section.groupChats.firstIndex(where: { $0.id == chatID }) else { return nil }
+        return Binding(
+            get: {
+                let sections = decodeSections(from: managerSectionsRaw)
+                guard let sectionIndex = sections.firstIndex(where: { $0.id == sectionID }),
+                      let chatIndex = sections[sectionIndex].groupChats.firstIndex(where: { $0.id == chatID }) else {
+                    return section.groupChats[index]
+                }
+                return sections[sectionIndex].groupChats[chatIndex]
+            },
+            set: { updatedChat in
+                var sections = decodeSections(from: managerSectionsRaw)
+                guard let sectionIndex = sections.firstIndex(where: { $0.id == sectionID }),
+                      let chatIndex = sections[sectionIndex].groupChats.firstIndex(where: { $0.id == chatID }) else { return }
+                sections[sectionIndex].groupChats[chatIndex] = updatedChat
+                managerSectionsRaw = encodeSections(sections)
+            }
+        )
+    }
 }
 
 struct ManagerSectionDashboardView: View {
@@ -1120,6 +1222,7 @@ struct ManagerSectionDashboardView: View {
 
     @Binding var section: ManagerSection
     let onSave: () -> Void
+    let onOpenGroupChat: (UUID) -> Void
 
     @State private var showCreateChatSheet = false
     @State private var showSectionSettingsSheet = false
@@ -1267,24 +1370,19 @@ struct ManagerSectionDashboardView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(section.groupChats) { chat in
-                            if let chatBinding = groupChatBinding(for: chat.id) {
-                                NavigationLink {
-                                    SectionGroupChatDetailView(
-                                        chat: chatBinding,
-                                        members: section.members,
-                                        onSave: onSave
-                                    )
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(chat.name)
-                                            .font(.headline)
-                                        Text(latestMessagePreview(for: chat))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
+                            Button {
+                                onOpenGroupChat(chat.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(chat.name)
+                                        .font(.headline)
+                                    Text(latestMessagePreview(for: chat))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
                                 }
                             }
+                            .buttonStyle(.plain)
                         }
                         .onDelete(perform: deleteGroupChats)
                     }
@@ -2467,7 +2565,7 @@ struct ManagerSectionTaskDetailView: View {
                 }
             }
 
-            Section(localized("Manager Notes", language)) {
+            Section(localized("Crew Lead Notes", language)) {
                 TextEditor(text: $managerNotesDraft)
                     .frame(minHeight: 120)
 
@@ -2592,7 +2690,7 @@ struct SectionGroupChatDetailView: View {
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color.arcAccentOrange)
                 }
 
                 TextField(localized("Type a message", language), text: $newMessageText)
@@ -2607,7 +2705,7 @@ struct SectionGroupChatDetailView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 30))
                 }
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.arcAccentOrange)
                 .disabled(newMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, 12)
@@ -2627,7 +2725,12 @@ struct SectionGroupChatDetailView: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationView {
-                GroupChatSettingsView(chat: $chat, members: members, onSave: onSave)
+                GroupChatSettingsView(
+                    chat: $chat,
+                    members: members,
+                    onSave: onSave,
+                    onDone: { showSettings = false }
+                )
             }
             .navigationViewStyle(.stack)
         }
@@ -2655,7 +2758,7 @@ struct SectionGroupChatDetailView: View {
 
         chat.messages.append(
             GroupChatMessage(
-                sender: "Manager",
+                sender: "Crew Lead",
                 text: cleanedText,
                 time: shortTimeString(),
                 messageType: .text
@@ -2667,7 +2770,7 @@ struct SectionGroupChatDetailView: View {
 
     @ViewBuilder
     private func messageBubble(_ message: GroupChatMessage) -> some View {
-        let isCurrentUser = message.sender == "Manager"
+        let isCurrentUser = message.sender == "Crew Lead"
         if message.messageType == .text {
             HStack {
                 if isCurrentUser {
@@ -2772,11 +2875,11 @@ struct SectionGroupChatDetailView: View {
 
     private func toggleReaction(messageID: UUID, emoji: String) {
         guard let index = chat.messages.firstIndex(where: { $0.id == messageID }) else { return }
-        if let reactionIndex = chat.messages[index].reactions.firstIndex(where: { $0.emoji == emoji && $0.by == "Manager" }) {
+        if let reactionIndex = chat.messages[index].reactions.firstIndex(where: { $0.emoji == emoji && $0.by == "Crew Lead" }) {
             chat.messages[index].reactions.remove(at: reactionIndex)
         } else {
             chat.messages[index].reactions.append(
-                MessageReaction(emoji: emoji, by: "Manager")
+                MessageReaction(emoji: emoji, by: "Crew Lead")
             )
         }
         onSave()
@@ -2785,7 +2888,7 @@ struct SectionGroupChatDetailView: View {
     private func sendMediaMessage(type: ChatMessageType, label: String) {
         chat.messages.append(
             GroupChatMessage(
-                sender: "Manager",
+                sender: "Crew Lead",
                 text: "",
                 time: shortTimeString(),
                 messageType: type,
@@ -2807,7 +2910,7 @@ struct SectionGroupChatDetailView: View {
     }
 
     private func displaySenderName(_ sender: String) -> String {
-        guard sender != "Manager" else { return sender }
+        guard sender != "Crew Lead" else { return sender }
         guard let member = members.first(where: {
             $0.name == sender || abbreviatedDisplayName($0.name) == sender
         }) else {
@@ -2835,15 +2938,21 @@ struct GroupChatSettingsView: View {
     @Binding var chat: SectionGroupChat
     let members: [SectionMember]
     let onSave: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
     @AppStorage("managerCrewNicknamesJSON") private var managerCrewNicknamesRaw = ""
     @State private var draftChat: SectionGroupChat
 
-    init(chat: Binding<SectionGroupChat>, members: [SectionMember], onSave: @escaping () -> Void) {
+    init(
+        chat: Binding<SectionGroupChat>,
+        members: [SectionMember],
+        onSave: @escaping () -> Void,
+        onDone: @escaping () -> Void
+    ) {
         self._chat = chat
         self.members = members
         self.onSave = onSave
+        self.onDone = onDone
         _draftChat = State(initialValue: chat.wrappedValue)
     }
 
@@ -2929,13 +3038,12 @@ struct GroupChatSettingsView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(localized("Done", language)) {
-                    persistDraftChanges()
-                    dismiss()
+                    onDone()
+                    DispatchQueue.main.async {
+                        persistDraftChanges()
+                    }
                 }
             }
-        }
-        .onDisappear {
-            persistDraftChanges()
         }
     }
 
@@ -3108,7 +3216,7 @@ struct ManagerMemberTodoDetailView: View {
                 }
             }
 
-            Section(localized("Manager Notes", language)) {
+            Section(localized("Crew Lead Notes", language)) {
                 TextEditor(text: $notesDraft)
                     .frame(minHeight: 120)
             }
@@ -3513,7 +3621,7 @@ struct MemberDetailView: View {
                         .frame(minHeight: 90)
                         .overlay(alignment: .topLeading) {
                             if newTodoManagerNotes.isEmpty {
-                                Text(localized("Manager notes (optional)", language))
+                                Text(localized("Crew Lead notes (optional)", language))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .padding(.top, 8)

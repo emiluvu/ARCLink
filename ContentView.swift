@@ -11,6 +11,7 @@ private let demoAppStorageSuiteName = "ARCLinkDemoDefaults"
 private let demoAppStorage = UserDefaults(suiteName: demoAppStorageSuiteName) ?? .standard
 
 struct ContentView: View {
+    @Environment(BluetoothManager.self) private var bluetoothManager
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("isInDemoMode") private var isInDemoMode = false
     @AppStorage("demoActiveRole") private var demoActiveRoleRawValue = AppRole.manager.rawValue
@@ -30,6 +31,8 @@ struct ContentView: View {
     @AppStorage("managerCrewNicknamesJSON") private var managerCrewNicknamesRaw = ""
     @AppStorage("workerPrivateTaskNotesJSON") private var workerPrivateTaskNotesRaw = ""
     @State private var showsLaunchSplash = true
+    @State private var automaticBluetoothSendTask: Task<Void, Never>?
+    @State private var lastAutomaticallySentPayload: String?
 
     private var currentRole: AppRole? {
         AppRole(rawValue: profileRoleRawValue)
@@ -82,6 +85,25 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: bluetoothManager.isConnected()) {
+            if bluetoothManager.isConnected() {
+                scheduleAutomaticARCVisorUpdate(forceResend: true)
+            } else {
+                automaticBluetoothSendTask?.cancel()
+                lastAutomaticallySentPayload = nil
+            }
+        }
+        .onChange(of: managerSectionsRaw) {
+            scheduleAutomaticARCVisorUpdate()
+        }
+        .onChange(of: managerPersonalTodosRaw) {
+            scheduleAutomaticARCVisorUpdate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification, object: demoAppStorage)) { _ in
+            guard isInDemoMode else { return }
+            scheduleAutomaticARCVisorUpdate()
+        }
+        .tint(.arcAccentOrange)
     }
 
     private func createProfileAndSignIn(
@@ -227,6 +249,69 @@ struct ContentView: View {
         }
         registeredProfilesRaw = encodeRegisteredProfiles(profiles)
     }
+
+    private func scheduleAutomaticARCVisorUpdate(forceResend: Bool = false) {
+        guard bluetoothManager.isConnected() else { return }
+        automaticBluetoothSendTask?.cancel()
+        automaticBluetoothSendTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            sendAutomaticARCVisorUpdateIfPossible(forceResend: forceResend)
+        }
+    }
+
+    private func sendAutomaticARCVisorUpdateIfPossible(forceResend: Bool = false) {
+        guard bluetoothManager.isConnected() else { return }
+        guard let payloadContext else { return }
+        guard let payload = try? encodedARCVisorPayload(from: payloadContext) else { return }
+        guard forceResend || payload != lastAutomaticallySentPayload else { return }
+        do {
+            try bluetoothManager.writeString(payload)
+            lastAutomaticallySentPayload = payload
+        } catch {
+            return
+        }
+    }
+
+    private var payloadContext: ARCVisorPayloadContext? {
+        let resolvedRole: AppRole?
+        let resolvedName: String
+        let resolvedAccountID: String
+        let resolvedPhoneNumber: String
+        let resolvedSectionsRaw: String
+        let resolvedAssignedCodesRaw: String
+        let resolvedPersonalTodosRaw: String
+
+        if isInDemoMode {
+            resolvedRole = demoActiveRole
+            resolvedName = demoAppStorage.string(forKey: "profileName") ?? demoProfile(for: demoActiveRole).name
+            resolvedAccountID = demoAppStorage.string(forKey: "profileAccountID") ?? demoProfile(for: demoActiveRole).accountID
+            resolvedPhoneNumber = demoAppStorage.string(forKey: "profilePhoneNumber") ?? demoProfile(for: demoActiveRole).phoneNumber
+            resolvedSectionsRaw = demoAppStorage.string(forKey: "managerSectionsJSON") ?? ""
+            resolvedAssignedCodesRaw = demoAppStorage.string(forKey: "managerAssignedSectionCodesJSON") ?? ""
+            resolvedPersonalTodosRaw = demoAppStorage.string(forKey: "managerPersonalTodosJSON") ?? ""
+        } else {
+            resolvedRole = currentRole
+            resolvedName = profileName
+            resolvedAccountID = profileAccountID
+            resolvedPhoneNumber = profilePhoneNumber
+            resolvedSectionsRaw = managerSectionsRaw
+            resolvedAssignedCodesRaw = managerAssignedSectionCodesRaw
+            resolvedPersonalTodosRaw = managerPersonalTodosRaw
+        }
+
+        guard let resolvedRole else { return nil }
+
+        return ARCVisorPayloadContext(
+            userName: abbreviatedDisplayName(resolvedName),
+            roleTitle: resolvedRole.title,
+            profileAccountID: resolvedAccountID,
+            profilePhoneNumber: resolvedPhoneNumber,
+            managerSectionsRaw: resolvedSectionsRaw,
+            assignedSectionCodesRaw: resolvedAssignedCodesRaw,
+            managerPersonalTodosRaw: resolvedPersonalTodosRaw
+        )
+    }
 }
 
 private struct DemoModeContainerView: View {
@@ -299,7 +384,7 @@ private struct DemoModeContainerView: View {
                     set: { onSelectRole($0) }
                 )
             ) {
-                Text(localized("Manager", language)).tag(AppRole.manager)
+                Text(localized("Crew Lead", language)).tag(AppRole.manager)
                 Text(localized("Crew", language)).tag(AppRole.worker)
             }
             .pickerStyle(.segmented)

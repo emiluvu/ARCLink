@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct ARCLinkApp: App {
+    @State private var bluetoothManager = BluetoothManager()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(bluetoothManager)
         }
     }
 }

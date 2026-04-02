@@ -131,8 +131,8 @@ final class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDe
      * ```
      */
     public func writeString(_ text: String) throws(BluetoothError) {
-        guard let data = text.data(using: .utf8) else { throw BluetoothError.invalidArgument }
-        try write(data)
+        guard var data = text.data(using: .utf8) else { throw BluetoothError.invalidArgument }
+        try write(&data)
     }
     
     /**
@@ -142,9 +142,31 @@ final class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDe
      * ``BluetoothError.noCharacteristic`` when a device is connected by lacks the characteristic to
      * write to.
      */
-    public func write(_ data: Data) throws(BluetoothError) {
+
+    public func write(_ data: inout Data) throws(BluetoothError) {
         guard let dev = device else { throw BluetoothError.noDevice }
         guard let characteristic = deviceCharacteristic else { throw BluetoothError.noCharacteristic }
+        
+        let chunkSize = 500
+        
+        while !data.isEmpty {
+            let end = min(chunkSize, data.count)
+            
+            print("intended len: \(end)")
+            
+            var subdata = Data(count: 1)
+            subdata[0] = 0
+            subdata.append(data.subdata(in: 0..<end))
+            
+            print("subdata length: \(subdata.count)")
+            
+            dev.writeValue(subdata, for: characteristic, type: .withResponse)
+            data.removeSubrange(0..<end)
+        }
+        
+        var data = Data(count: 1)
+        data[0] = 1
+
         dev.writeValue(data, for: characteristic, type: .withResponse)
     }
     

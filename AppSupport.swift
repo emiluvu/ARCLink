@@ -1,4 +1,4 @@
-\//
+//
 //  AppSupport.swift
 //  test
 //
@@ -6,6 +6,11 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+
+extension Color {
+    static let arcAccentOrange = Color(red: 0.92, green: 0.45, blue: 0.12)
+    static let arcAccentOrangeSoft = Color(red: 0.98, green: 0.72, blue: 0.32)
+}
 
 func decodeRegisteredProfiles(from rawValue: String) -> [RegisteredProfile] {
     guard let data = rawValue.data(using: .utf8), !rawValue.isEmpty else { return [] }
@@ -157,7 +162,7 @@ func defaultDemoSections() -> [ManagerSection] {
                 createdAt: "3/09/26",
                 participantMemberIDs: [safetyLead.id, foreman.id],
                 messages: [
-                    GroupChatMessage(sender: "Safety Lead", text: "High-wind protocol active after 2 PM.", time: "8:05 AM")
+                    GroupChatMessage(sender: "Safety Lead", text: "EMERGENCY: Clear the east access ramp now. Crane swing zone breach reported. Move to the muster point immediately.", time: "8:05 AM")
                 ]
             )
         ],
@@ -173,7 +178,7 @@ func defaultDemoSections() -> [ManagerSection] {
             ),
             SectionTask(
                 title: "Acknowledge east access pour barricades",
-                descriptionText: "Walk the east access path, confirm barricades are staged, and mark the task done for manager verification.",
+                descriptionText: "Walk the east access path, confirm barricades are staged, and mark the task done for crew lead verification.",
                 priority: .urgent,
                 dueDate: Calendar.current.date(byAdding: .hour, value: 2, to: Date()) ?? Date(),
                 siteName: "Tower A - Concrete",
@@ -185,7 +190,7 @@ func defaultDemoSections() -> [ManagerSection] {
                 ],
                 requiresAcknowledgement: true,
                 assigneeIDs: [foreman.id],
-                managerNotes: "Mark this done after you physically confirm the barricades. Manager will verify final completion.",
+                managerNotes: "Mark this done after you physically confirm the barricades. Crew Lead will verify final completion.",
                 doneMemberIDs: [foreman.id],
                 verifiedMemberIDs: []
             )
@@ -487,7 +492,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
     guard language == .spanish else { return text }
 
     let translations: [String: String] = [
-        "Manager": "Gerente",
+        "Crew Lead": "Jefe de cuadrilla",
         "Worker": "Cuadrilla",
         "Crew": "Cuadrilla",
         "Open ARCVisor": "Abrir ARCVisor",
@@ -496,7 +501,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Open Demo": "Abrir demo",
         "Exit Demo": "Salir del demo",
         "View As": "Ver como",
-        "Try the seeded manager and crew experience without signing in.": "Prueba la experiencia preconfigurada de gerente y cuadrilla sin iniciar sesión.",
+        "Try the seeded crew lead and crew experience without signing in.": "Prueba la experiencia preconfigurada de jefe de cuadrilla y cuadrilla sin iniciar sesión.",
         "Mode": "Modo",
         "Create Profile": "Crear perfil",
         "Sign In": "Iniciar sesión",
@@ -512,8 +517,8 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Section Access": "Acceso a sección",
         "Section code word": "Código de sección",
         "Password": "Contraseña",
-        "No sections exist yet. Ask your manager to create one and share its code word.": "Todavía no hay secciones. Pídele a tu gerente que cree una y comparta su código.",
-        "Enter the section code word from your manager to join the right crew.": "Ingresa el código de sección de tu gerente para unirte al equipo correcto.",
+        "No sections exist yet. Ask your crew lead to create one and share its code word.": "Todavía no hay secciones. Pídele a tu jefe de cuadrilla que cree una y comparta su código.",
+        "Enter the section code word from your crew lead to join the right crew.": "Ingresa el código de sección de tu jefe de cuadrilla para unirte al equipo correcto.",
         "Sections": "Secciones",
         "Managed Sections": "Secciones administradas",
         "Leadership Sections": "Secciones de liderazgo",
@@ -535,7 +540,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Joined leadership section.": "Te uniste a la sección de liderazgo.",
         "My Profile": "Mi perfil",
         "Profile": "Perfil",
-        "Role: Manager": "Rol: Gerente",
+        "Role: Crew Lead": "Rol: Jefe de cuadrilla",
         "Role: Worker": "Rol: Cuadrilla",
         "Role: Crew": "Rol: Cuadrilla",
         "Account ID": "ID de cuenta",
@@ -564,7 +569,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "No saved messages yet.": "Todavía no hay mensajes guardados.",
         "Save Message": "Guardar mensaje",
         "Unsave Message": "Quitar mensaje guardado",
-        "Waiting for manager verification": "Esperando verificación del gerente",
+        "Waiting for crew lead verification": "Esperando verificación del jefe de cuadrilla",
         "Overall To-Do List": "Lista general de tareas",
         "Show Overall To-Do List": "Mostrar la lista general de tareas",
         "No leadership to-dos assigned yet.": "Todavía no hay tareas de liderazgo asignadas.",
@@ -593,7 +598,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Can write in chat": "Puede escribir en el chat",
         "Read only": "Solo lectura",
         "Chat Details": "Detalles del chat",
-        "This chat is read only. Your manager can enable write access in chat settings.": "Este chat es de solo lectura. Tu gerente puede habilitar acceso de escritura en la configuración del chat.",
+        "This chat is read only. Your crew lead can enable write access in chat settings.": "Este chat es de solo lectura. Tu jefe de cuadrilla puede habilitar acceso de escritura en la configuración del chat.",
         "No workers have joined this section yet.": "Todavía no se han unido cuadrillas a esta sección.",
         "No crews have joined this section yet.": "Todavía no se han unido cuadrillas a esta sección.",
         "On Site": "En obra",
@@ -662,8 +667,8 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Task": "Tarea",
         "To-Do": "Tarea",
         "Status": "Estado",
-        "Manager Notes": "Notas del gerente",
-        "No manager notes yet.": "Todavía no hay notas del gerente.",
+        "Crew Lead Notes": "Notas del jefe de cuadrilla",
+        "No crew lead notes yet.": "Todavía no hay notas del jefe de cuadrilla.",
         "My Private Notes": "Mis notas privadas",
         "Save Private Note": "Guardar nota privada",
         "Mark Complete": "Marcar como completada",
@@ -689,7 +694,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Delete": "Eliminar",
         "Assign To-Do on Calendar": "Asignar tarea en el calendario",
         "To-do item": "Tarea",
-        "Manager notes (optional)": "Notas del gerente (opcional)",
+        "Crew Lead notes (optional)": "Notas del jefe de cuadrilla (opcional)",
         "Add To-Do": "Agregar tarea",
         "Due": "Entrega",
         "Remove Members": "Eliminar miembros",
@@ -698,7 +703,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "No subsections assigned.": "No hay subsecciones asignadas.",
         "Done": "Listo",
         "Section not found.": "Sección no encontrada.",
-        "Augmented reality visor linked through ARCLink.": "Visor de realidad aumentada conectado mediante ARCLink.",
+        "Augmented Reality Construction Visor": "Visor de construcción de realidad aumentada",
         "Signed in as": "Sesión iniciada como",
         "Connection": "Conexión",
         "Device discovery ready": "Detección de dispositivo lista",
@@ -707,6 +712,15 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Task overlays available": "Superposiciones de tareas disponibles",
         "Task overlays unavailable": "Superposiciones de tareas no disponibles",
         "What ARCVisor Will Do": "Lo que hará ARCVisor",
+        "Payload Preview": "Vista previa de carga",
+        "Display Preview": "Vista previa de pantalla",
+        "Outgoing Device Payload": "Carga saliente al dispositivo",
+        "Copy JSON Payload": "Copiar carga JSON",
+        "Payload copied to clipboard.": "Carga copiada al portapapeles.",
+        "Review the live JSON currently being prepared for the Raspberry Pi.": "Revisa el JSON en vivo que se está preparando para la Raspberry Pi.",
+        "Simple micro-OLED mock using the same live payload data.": "Maqueta simple de micro-OLED usando los mismos datos de carga en vivo.",
+        "Payload unavailable.": "Carga no disponible.",
+        "ARCVisor connects automatically when the device is available.": "ARCVisor se conecta automáticamente cuando el dispositivo está disponible.",
         "Show section tasks, crew locations, and pinned updates in an AR visor view.": "Mostrar tareas de la sección, ubicaciones del equipo y actualizaciones fijadas en una vista de visor AR.",
         "Pull worker assignments and on-site status directly from ARCLink.": "Obtener asignaciones de cuadrillas y estado en obra directamente desde ARCLink.",
         "Pull crew assignments and on-site status directly from ARCLink.": "Obtener asignaciones de cuadrillas y estado en obra directamente desde ARCLink.",
@@ -716,6 +730,273 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
     ]
 
     return translations[text] ?? text
+}
+
+struct ARCVisorPayloadContext {
+    let userName: String
+    let roleTitle: String
+    let profileAccountID: String
+    let profilePhoneNumber: String
+    let managerSectionsRaw: String
+    let assignedSectionCodesRaw: String
+    let managerPersonalTodosRaw: String
+}
+
+struct ARCVisorPayload: Codable {
+    let userName: String
+    let sectionSummaries: [ARCVisorSectionSummary]
+    let topTodos: [ARCVisorTodoSummary]
+    let notifications: [ARCVisorNotificationSummary]
+}
+
+struct ARCVisorSectionSummary: Codable {
+    let name: String
+    let codeWord: String
+    let memberCount: Int
+    let taskCount: Int
+    let chatCount: Int
+}
+
+struct ARCVisorTodoSummary: Codable {
+    let title: String
+    let priority: String
+    let sourceSection: String
+    let dueDate: Date
+}
+
+struct ARCVisorNotificationSummary: Codable {
+    let title: String
+    let message: String
+}
+
+func encodedARCVisorPayload(from context: ARCVisorPayloadContext) throws -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+    let data = try encoder.encode(arcVisorPayload(from: context))
+    return String(decoding: data, as: UTF8.self)
+}
+
+func arcVisorPayload(from context: ARCVisorPayloadContext) -> ARCVisorPayload {
+    ARCVisorPayload(
+        userName: context.userName,
+        sectionSummaries: arcVisorSectionSummaries(from: context),
+        topTodos: arcVisorTopTodos(from: context),
+        notifications: arcVisorNotifications(from: context)
+    )
+}
+
+private func arcVisorSectionSummaries(from context: ARCVisorPayloadContext) -> [ARCVisorSectionSummary] {
+    let allSections = decodeSections(from: context.managerSectionsRaw)
+    let assignedLeadershipCodes = decodeStringArray(from: context.assignedSectionCodesRaw)
+
+    if context.roleTitle == "Crew Lead" {
+        return allSections
+            .filter { $0.ownerAccountID == context.profileAccountID || assignedLeadershipCodes.contains($0.codeWord) }
+            .map { section in
+                ARCVisorSectionSummary(
+                    name: section.name,
+                    codeWord: section.codeWord,
+                    memberCount: section.members.count,
+                    taskCount: section.sectionTasks.count,
+                    chatCount: section.groupChats.count
+                )
+            }
+    }
+
+    let crewSections = allSections.filter { section in
+        section.members.contains(where: { $0.phoneNumber == context.profilePhoneNumber })
+    }
+
+    return crewSections.map { section in
+        let member = section.members.first(where: { $0.phoneNumber == context.profilePhoneNumber })
+        let assignedTaskCount = section.sectionTasks.filter { task in
+            guard let member else { return false }
+            return task.assigneeIDs.contains(member.id)
+        }.count
+
+        return ARCVisorSectionSummary(
+            name: section.name,
+            codeWord: section.codeWord,
+            memberCount: section.members.count,
+            taskCount: assignedTaskCount,
+            chatCount: section.groupChats.filter { chat in
+                guard let member else { return false }
+                return chat.participantMemberIDs.isEmpty || chat.participantMemberIDs.contains(member.id)
+            }.count
+        )
+    }
+}
+
+private func arcVisorTopTodos(from context: ARCVisorPayloadContext) -> [ARCVisorTodoSummary] {
+    let todos = context.roleTitle == "Crew Lead"
+        ? managerARCVisorTodos(from: context)
+        : crewARCVisorTodos(from: context)
+
+    return todos
+        .sorted {
+            let leftRank = priorityRank(for: $0.priority)
+            let rightRank = priorityRank(for: $1.priority)
+            if leftRank == rightRank {
+                return $0.dueDate < $1.dueDate
+            }
+            return leftRank > rightRank
+        }
+        .prefix(3)
+        .map { $0 }
+}
+
+private func arcVisorNotifications(from context: ARCVisorPayloadContext) -> [ARCVisorNotificationSummary] {
+    let allSections = decodeSections(from: context.managerSectionsRaw)
+    let assignedLeadershipCodes = decodeStringArray(from: context.assignedSectionCodesRaw)
+    let sections: [ManagerSection]
+
+    if context.roleTitle == "Crew Lead" {
+        sections = allSections.filter {
+            $0.ownerAccountID == context.profileAccountID || assignedLeadershipCodes.contains($0.codeWord)
+        }
+    } else {
+        sections = allSections.filter { section in
+            section.members.contains(where: { $0.phoneNumber == context.profilePhoneNumber })
+        }
+    }
+
+    var notifications: [ARCVisorNotificationSummary] = []
+    for section in sections {
+        let currentMember = section.members.first(where: { $0.phoneNumber == context.profilePhoneNumber })
+        let visibleChats = context.roleTitle == "Crew Lead"
+            ? section.groupChats
+            : section.groupChats.filter { chat in
+                guard let currentMember else { return false }
+                return chat.participantMemberIDs.isEmpty || chat.participantMemberIDs.contains(currentMember.id)
+            }
+
+        for chat in visibleChats {
+            if let latestMessage = chat.messages.last {
+                notifications.append(
+                    ARCVisorNotificationSummary(
+                        title: chat.name,
+                        message: "\(latestMessage.sender): \(arcVisorMessagePreview(latestMessage))"
+                    )
+                )
+            }
+        }
+    }
+
+    if let emergencyNotification = notifications.last(where: {
+        $0.message.localizedCaseInsensitiveContains("emergency")
+    }) {
+        let recentNonEmergencyNotifications = notifications
+            .filter { $0.message != emergencyNotification.message || $0.title != emergencyNotification.title }
+            .suffix(1)
+        return [emergencyNotification] + recentNonEmergencyNotifications
+    }
+
+    return Array(notifications.suffix(2))
+}
+
+private func managerARCVisorTodos(from context: ARCVisorPayloadContext) -> [ARCVisorTodoSummary] {
+    let allSections = decodeSections(from: context.managerSectionsRaw)
+    let assignedLeadershipCodes = decodeStringArray(from: context.assignedSectionCodesRaw)
+
+    var todos = decodeMemberTodos(from: context.managerPersonalTodosRaw).map { todo in
+        ARCVisorTodoSummary(
+            title: todo.title,
+            priority: todo.priority.title,
+            sourceSection: "My To-Do",
+            dueDate: todo.dueDate
+        )
+    }
+
+    let visibleSections = allSections.filter {
+        $0.ownerAccountID == context.profileAccountID || assignedLeadershipCodes.contains($0.codeWord)
+    }
+
+    for section in visibleSections {
+        guard let member = section.members.first(where: {
+            (!context.profileAccountID.isEmpty && $0.accountID == context.profileAccountID) || $0.phoneNumber == context.profilePhoneNumber
+        }) else { continue }
+
+        todos.append(contentsOf: section.sectionTasks
+            .filter { $0.assigneeIDs.contains(member.id) }
+            .map { task in
+                ARCVisorTodoSummary(
+                    title: task.title,
+                    priority: task.priority.title,
+                    sourceSection: section.name,
+                    dueDate: task.dueDate
+                )
+            })
+
+        todos.append(contentsOf: member.todos.map { todo in
+            ARCVisorTodoSummary(
+                title: todo.title,
+                priority: todo.priority.title,
+                sourceSection: section.name,
+                dueDate: todo.dueDate
+            )
+        })
+    }
+
+    return todos
+}
+
+private func crewARCVisorTodos(from context: ARCVisorPayloadContext) -> [ARCVisorTodoSummary] {
+    let allSections = decodeSections(from: context.managerSectionsRaw)
+    let crewSections = allSections.filter { section in
+        section.members.contains(where: { $0.phoneNumber == context.profilePhoneNumber })
+    }
+
+    var todos: [ARCVisorTodoSummary] = []
+    for section in crewSections {
+        guard let member = section.members.first(where: { $0.phoneNumber == context.profilePhoneNumber }) else { continue }
+
+        todos.append(contentsOf: section.sectionTasks
+            .filter { $0.assigneeIDs.contains(member.id) }
+            .map { task in
+                ARCVisorTodoSummary(
+                    title: task.title,
+                    priority: task.priority.title,
+                    sourceSection: section.name,
+                    dueDate: task.dueDate
+                )
+            })
+
+        todos.append(contentsOf: member.todos.map { todo in
+            ARCVisorTodoSummary(
+                title: todo.title,
+                priority: todo.priority.title,
+                sourceSection: section.name,
+                dueDate: todo.dueDate
+            )
+        })
+    }
+
+    return todos
+}
+
+private func priorityRank(for priority: String) -> Int {
+    switch priority {
+    case TaskPriority.urgent.title:
+        return 4
+    case TaskPriority.high.title:
+        return 3
+    case TaskPriority.medium.title:
+        return 2
+    default:
+        return 1
+    }
+}
+
+private func arcVisorMessagePreview(_ message: GroupChatMessage) -> String {
+    switch message.messageType {
+    case .text:
+        return message.text
+    case .photo:
+        return message.attachmentLabel ?? "Photo"
+    case .video:
+        return message.attachmentLabel ?? "Video"
+    }
 }
 
 func greetingText(name: String, language: AppLanguage) -> String {
@@ -1006,11 +1287,11 @@ struct AppBrandImage: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var primaryLogoColor: Color {
-        colorScheme == .dark ? .white.opacity(0.92) : .black.opacity(0.82)
+        colorScheme == .dark ? .arcAccentOrangeSoft : .arcAccentOrange
     }
 
     private var secondaryLogoColor: Color {
-        colorScheme == .dark ? .white.opacity(0.82) : .black.opacity(0.72)
+        colorScheme == .dark ? .arcAccentOrange.opacity(0.92) : .arcAccentOrangeSoft
     }
 
     var body: some View {
