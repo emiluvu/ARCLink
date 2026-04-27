@@ -6,6 +6,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import AppIntents
 
 private enum ManagerOverallTodoNoteNamespace: String {
     case sectionTask = "manager-overall-section"
@@ -1041,6 +1042,15 @@ struct ManagerProfileDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section(localized("Siri & Shortcuts", language)) {
+                Text(localized("Use Siri or the Shortcuts app to run ARCLink actions like adding a personal to-do.", language))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ShortcutsLink()
+                    .shortcutsLinkStyle(.automaticOutline)
             }
         }
         .navigationTitle(localized("My Profile", language))

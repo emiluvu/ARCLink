@@ -6,10 +6,308 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import AppIntents
 
 extension Color {
     static let arcAccentOrange = Color(red: 0.92, green: 0.45, blue: 0.12)
     static let arcAccentOrangeSoft = Color(red: 0.98, green: 0.72, blue: 0.32)
+}
+
+let arcLinkDemoAppStorageSuiteName = "ARCLinkDemoDefaults"
+
+func arcLinkActiveUserDefaults() -> UserDefaults {
+    let standardDefaults = UserDefaults.standard
+    guard standardDefaults.bool(forKey: "isInDemoMode") else {
+        return standardDefaults
+    }
+    return UserDefaults(suiteName: arcLinkDemoAppStorageSuiteName) ?? standardDefaults
+}
+
+private enum ARCLinkTaskCompletionResult {
+    case completed(String)
+    case alreadyCompleted(String)
+    case notFound
+}
+
+private struct ARCLinkTaskSummary {
+    let title: String
+    let dueDate: Date
+    let sourceLabel: String
+}
+
+private func normalizedTaskMatchTitle(_ title: String) -> String {
+    title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+}
+
+private func memberMatchesCurrentProfile(_ member: SectionMember, accountID: String, phoneNumber: String) -> Bool {
+    (!accountID.isEmpty && member.accountID == accountID) || (!phoneNumber.isEmpty && member.phoneNumber == phoneNumber)
+}
+
+private func markManagerTaskComplete(named title: String, defaults: UserDefaults) -> ARCLinkTaskCompletionResult {
+    let matchTitle = normalizedTaskMatchTitle(title)
+
+    var managerTodos = decodeMemberTodos(from: defaults.string(forKey: "managerPersonalTodosJSON") ?? "")
+    if let todoIndex = managerTodos.firstIndex(where: { normalizedTaskMatchTitle($0.title) == matchTitle }) {
+        if managerTodos[todoIndex].isCompleted {
+            return .alreadyCompleted(managerTodos[todoIndex].title)
+        }
+        managerTodos[todoIndex].isMarkedDone = true
+        managerTodos[todoIndex].isCompleted = true
+        defaults.set(encodeMemberTodos(managerTodos), forKey: "managerPersonalTodosJSON")
+        return .completed(managerTodos[todoIndex].title)
+    }
+
+    let accountID = defaults.string(forKey: "profileAccountID") ?? ""
+    let phoneNumber = defaults.string(forKey: "profilePhoneNumber") ?? ""
+    var sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+
+    for sectionIndex in sections.indices {
+        guard let memberIndex = sections[sectionIndex].members.firstIndex(where: {
+            memberMatchesCurrentProfile($0, accountID: accountID, phoneNumber: phoneNumber)
+        }) else { continue }
+
+        let memberID = sections[sectionIndex].members[memberIndex].id
+
+        if let todoIndex = sections[sectionIndex].members[memberIndex].todos.firstIndex(where: {
+            normalizedTaskMatchTitle($0.title) == matchTitle
+        }) {
+            if sections[sectionIndex].members[memberIndex].todos[todoIndex].isCompleted {
+                return .alreadyCompleted(sections[sectionIndex].members[memberIndex].todos[todoIndex].title)
+            }
+            sections[sectionIndex].members[memberIndex].todos[todoIndex].isMarkedDone = true
+            sections[sectionIndex].members[memberIndex].todos[todoIndex].isCompleted = true
+            defaults.set(encodeSections(sections), forKey: "managerSectionsJSON")
+            return .completed(sections[sectionIndex].members[memberIndex].todos[todoIndex].title)
+        }
+
+        if let taskIndex = sections[sectionIndex].sectionTasks.firstIndex(where: {
+            normalizedTaskMatchTitle($0.title) == matchTitle && $0.assigneeIDs.contains(memberID)
+        }) {
+            let task = sections[sectionIndex].sectionTasks[taskIndex]
+            if task.verifiedMemberIDs.contains(memberID) {
+                return .alreadyCompleted(task.title)
+            }
+            if !sections[sectionIndex].sectionTasks[taskIndex].doneMemberIDs.contains(memberID) {
+                sections[sectionIndex].sectionTasks[taskIndex].doneMemberIDs.append(memberID)
+            }
+            if !sections[sectionIndex].sectionTasks[taskIndex].verifiedMemberIDs.contains(memberID) {
+                sections[sectionIndex].sectionTasks[taskIndex].verifiedMemberIDs.append(memberID)
+            }
+            defaults.set(encodeSections(sections), forKey: "managerSectionsJSON")
+            return .completed(task.title)
+        }
+    }
+
+    return .notFound
+}
+
+private func markWorkerTaskComplete(named title: String, defaults: UserDefaults) -> ARCLinkTaskCompletionResult {
+    let matchTitle = normalizedTaskMatchTitle(title)
+    let accountID = defaults.string(forKey: "profileAccountID") ?? ""
+    let phoneNumber = defaults.string(forKey: "profilePhoneNumber") ?? ""
+    var sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+
+    for sectionIndex in sections.indices {
+        guard let memberIndex = sections[sectionIndex].members.firstIndex(where: {
+            memberMatchesCurrentProfile($0, accountID: accountID, phoneNumber: phoneNumber)
+        }) else { continue }
+
+        let memberID = sections[sectionIndex].members[memberIndex].id
+
+        if let todoIndex = sections[sectionIndex].members[memberIndex].todos.firstIndex(where: {
+            normalizedTaskMatchTitle($0.title) == matchTitle
+        }) {
+            let todo = sections[sectionIndex].members[memberIndex].todos[todoIndex]
+            if todo.requiresAcknowledgement ? todo.isMarkedDone : todo.isCompleted {
+                return .alreadyCompleted(todo.title)
+            }
+            sections[sectionIndex].members[memberIndex].todos[todoIndex].isMarkedDone = true
+            sections[sectionIndex].members[memberIndex].todos[todoIndex].isCompleted = !todo.requiresAcknowledgement
+            defaults.set(encodeSections(sections), forKey: "managerSectionsJSON")
+            return .completed(todo.title)
+        }
+
+        if let taskIndex = sections[sectionIndex].sectionTasks.firstIndex(where: {
+            normalizedTaskMatchTitle($0.title) == matchTitle && $0.assigneeIDs.contains(memberID)
+        }) {
+            let task = sections[sectionIndex].sectionTasks[taskIndex]
+            if task.requiresAcknowledgement ? task.doneMemberIDs.contains(memberID) : task.verifiedMemberIDs.contains(memberID) {
+                return .alreadyCompleted(task.title)
+            }
+            if !sections[sectionIndex].sectionTasks[taskIndex].doneMemberIDs.contains(memberID) {
+                sections[sectionIndex].sectionTasks[taskIndex].doneMemberIDs.append(memberID)
+            }
+            if !task.requiresAcknowledgement &&
+                !sections[sectionIndex].sectionTasks[taskIndex].verifiedMemberIDs.contains(memberID) {
+                sections[sectionIndex].sectionTasks[taskIndex].verifiedMemberIDs.append(memberID)
+            }
+            defaults.set(encodeSections(sections), forKey: "managerSectionsJSON")
+            return .completed(task.title)
+        }
+    }
+
+    return .notFound
+}
+
+private func markCurrentUserTaskComplete(named title: String, defaults: UserDefaults) -> ARCLinkTaskCompletionResult {
+    let roleRawValue = defaults.string(forKey: "profileRole") ?? AppRole.worker.rawValue
+    switch AppRole(rawValue: roleRawValue) ?? .worker {
+    case .manager:
+        return markManagerTaskComplete(named: title, defaults: defaults)
+    case .worker:
+        return markWorkerTaskComplete(named: title, defaults: defaults)
+    }
+}
+
+private func currentUserTaskSummaries(defaults: UserDefaults) -> [ARCLinkTaskSummary] {
+    let roleRawValue = defaults.string(forKey: "profileRole") ?? AppRole.worker.rawValue
+    switch AppRole(rawValue: roleRawValue) ?? .worker {
+    case .manager:
+        return currentManagerTaskSummaries(defaults: defaults)
+    case .worker:
+        return currentWorkerTaskSummaries(defaults: defaults)
+    }
+}
+
+private func currentManagerTaskSummaries(defaults: UserDefaults) -> [ARCLinkTaskSummary] {
+    var summaries = decodeMemberTodos(from: defaults.string(forKey: "managerPersonalTodosJSON") ?? "").map {
+        ARCLinkTaskSummary(title: $0.title, dueDate: $0.dueDate, sourceLabel: "My To-Do")
+    }
+
+    let sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+    let assignedSectionCodes = Set(decodeStringArray(from: defaults.string(forKey: "managerAssignedSectionCodesJSON") ?? ""))
+    let accountID = defaults.string(forKey: "profileAccountID") ?? ""
+    let phoneNumber = defaults.string(forKey: "profilePhoneNumber") ?? ""
+
+    for section in sections where assignedSectionCodes.contains(section.codeWord) {
+        guard let member = section.members.first(where: {
+            memberMatchesCurrentProfile($0, accountID: accountID, phoneNumber: phoneNumber)
+        }) else { continue }
+
+        summaries.append(contentsOf: section.sectionTasks
+            .filter { $0.assigneeIDs.contains(member.id) }
+            .map { ARCLinkTaskSummary(title: $0.title, dueDate: $0.dueDate, sourceLabel: section.name) })
+
+        summaries.append(contentsOf: member.todos.map {
+            ARCLinkTaskSummary(title: $0.title, dueDate: $0.dueDate, sourceLabel: section.name)
+        })
+    }
+
+    return summaries.sorted { $0.dueDate < $1.dueDate }
+}
+
+private func currentWorkerTaskSummaries(defaults: UserDefaults) -> [ARCLinkTaskSummary] {
+    let sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+    let accountID = defaults.string(forKey: "profileAccountID") ?? ""
+    let phoneNumber = defaults.string(forKey: "profilePhoneNumber") ?? ""
+    var summaries: [ARCLinkTaskSummary] = []
+
+    for section in sections {
+        guard let member = section.members.first(where: {
+            memberMatchesCurrentProfile($0, accountID: accountID, phoneNumber: phoneNumber)
+        }) else { continue }
+
+        summaries.append(contentsOf: section.sectionTasks
+            .filter { $0.assigneeIDs.contains(member.id) }
+            .map { ARCLinkTaskSummary(title: $0.title, dueDate: $0.dueDate, sourceLabel: section.name) })
+
+        summaries.append(contentsOf: member.todos.map {
+            ARCLinkTaskSummary(title: $0.title, dueDate: $0.dueDate, sourceLabel: section.name)
+        })
+    }
+
+    return summaries.sorted { $0.dueDate < $1.dueDate }
+}
+
+private func currentUserTasksDialog(defaults: UserDefaults) -> IntentDialog {
+    let summaries = currentUserTaskSummaries(defaults: defaults)
+    guard !summaries.isEmpty else {
+        return IntentDialog("You have no tasks assigned right now.")
+    }
+
+    let topTasks = summaries.prefix(3).map { summary in
+        "\(summary.title) from \(summary.sourceLabel)"
+    }
+
+    if summaries.count == 1, let onlyTask = topTasks.first {
+        return IntentDialog("You have 1 task: \(onlyTask).")
+    }
+
+    let spokenList = ListFormatter.localizedString(byJoining: topTasks)
+    if summaries.count <= 3 {
+        return IntentDialog("You have \(summaries.count) tasks: \(spokenList).")
+    }
+
+    return IntentDialog("You have \(summaries.count) tasks. The next 3 are \(spokenList).")
+}
+
+private func normalizedPersonMatchName(_ name: String) -> String {
+    name
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+        .replacingOccurrences(of: ".", with: "")
+}
+
+private func currentOwnedSections(defaults: UserDefaults) -> [ManagerSection] {
+    let profileAccountID = defaults.string(forKey: "profileAccountID") ?? ""
+    let sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+    let demoOwnerID = defaultManagerDemoProfile().accountID
+
+    return sections.filter { section in
+        if let ownerAccountID = section.ownerAccountID {
+            return ownerAccountID == profileAccountID
+        }
+        return profileAccountID == demoOwnerID
+    }
+}
+
+private func assignTaskToCrewMember(
+    title: String,
+    crewMemberName: String,
+    dueDate: Date?,
+    sectionName: String?,
+    defaults: UserDefaults
+) -> String? {
+    let roleRawValue = defaults.string(forKey: "profileRole") ?? AppRole.manager.rawValue
+    guard AppRole(rawValue: roleRawValue) == .manager else { return nil }
+
+    let normalizedMemberName = normalizedPersonMatchName(crewMemberName)
+    let normalizedSectionName = sectionName.map(normalizedTaskMatchTitle)
+    let nicknames = decodeManagerCrewNicknames(from: defaults.string(forKey: "managerCrewNicknamesJSON") ?? "")
+    var sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+    let ownedSectionIDs = Set(currentOwnedSections(defaults: defaults).map(\.id))
+
+    for sectionIndex in sections.indices where ownedSectionIDs.contains(sections[sectionIndex].id) {
+        if let normalizedSectionName,
+           normalizedTaskMatchTitle(sections[sectionIndex].name) != normalizedSectionName {
+            continue
+        }
+
+        guard let member = sections[sectionIndex].members.first(where: {
+            let fullName = normalizedPersonMatchName($0.name)
+            let firstName = normalizedPersonMatchName(splitFullName($0.name).firstName)
+            let displayName = normalizedPersonMatchName(managerDisplayName(for: $0, nicknames: nicknames))
+            return fullName == normalizedMemberName ||
+                firstName == normalizedMemberName ||
+                displayName == normalizedMemberName
+        }) else {
+            continue
+        }
+
+        let task = SectionTask(
+            title: title,
+            priority: .medium,
+            dueDate: dueDate ?? Date(),
+            siteName: sections[sectionIndex].name,
+            requiresAcknowledgement: false,
+            assigneeIDs: [member.id]
+        )
+        sections[sectionIndex].sectionTasks.insert(task, at: 0)
+        defaults.set(encodeSections(sections), forKey: "managerSectionsJSON")
+        return "\(task.title) assigned to \(member.name) in \(sections[sectionIndex].name)."
+    }
+
+    return nil
 }
 
 func decodeRegisteredProfiles(from rawValue: String) -> [RegisteredProfile] {
@@ -704,6 +1002,8 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Done": "Listo",
         "Section not found.": "Sección no encontrada.",
         "Augmented Reality Construction Visor": "Visor de construcción de realidad aumentada",
+        "Siri & Shortcuts": "Siri y Atajos",
+        "Use Siri or the Shortcuts app to run ARCLink actions like adding a personal to-do.": "Usa Siri o la app Atajos para ejecutar acciones de ARCLink, como agregar una tarea personal.",
         "Signed in as": "Sesión iniciada como",
         "Connection": "Conexión",
         "Device discovery ready": "Detección de dispositivo lista",
@@ -1287,11 +1587,11 @@ struct AppBrandImage: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var primaryLogoColor: Color {
-        colorScheme == .dark ? .arcAccentOrangeSoft : .arcAccentOrange
+        .arcAccentOrange
     }
 
     private var secondaryLogoColor: Color {
-        colorScheme == .dark ? .arcAccentOrange.opacity(0.92) : .arcAccentOrangeSoft
+        .arcAccentOrange
     }
 
     var body: some View {
@@ -1305,5 +1605,185 @@ struct AppBrandImage: View {
                 .foregroundStyle(secondaryLogoColor)
         }
         .accessibilityHidden(true)
+    }
+}
+
+struct AddPersonalTodoIntent: AppIntent {
+    static let title: LocalizedStringResource = "Add Personal To-Do"
+    static let description = IntentDescription("Adds a new personal to-do for the current Crew Lead account.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Title")
+    var titleText: String
+
+    @Parameter(title: "Due Date")
+    var dueDate: Date?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Add \(\.$titleText) to personal to-dos")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let trimmedTitle = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return .result(dialog: "The to-do title can't be empty.")
+        }
+
+        let defaults = arcLinkActiveUserDefaults()
+        let roleRawValue = defaults.string(forKey: "profileRole") ?? AppRole.manager.rawValue
+        guard AppRole(rawValue: roleRawValue) == .manager else {
+            return .result(dialog: "This shortcut is only available for the Crew Lead role.")
+        }
+
+        var todos = decodeMemberTodos(from: defaults.string(forKey: "managerPersonalTodosJSON") ?? "")
+        todos.insert(
+            MemberTodo(
+                title: trimmedTitle,
+                dueDate: dueDate ?? Date()
+            ),
+            at: 0
+        )
+        defaults.set(encodeMemberTodos(todos), forKey: "managerPersonalTodosJSON")
+
+        return .result(dialog: IntentDialog("Added \(trimmedTitle) to your personal to-dos."))
+    }
+}
+
+struct CompleteTaskIntent: AppIntent {
+    static let title: LocalizedStringResource = "Complete Task"
+    static let description = IntentDescription("Marks one of the current user's tasks complete in ARCLink.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Task Title")
+    var taskTitle: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Mark \(\.$taskTitle) complete")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let trimmedTitle = taskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return .result(dialog: "The task title can't be empty.")
+        }
+
+        let defaults = arcLinkActiveUserDefaults()
+        switch markCurrentUserTaskComplete(named: trimmedTitle, defaults: defaults) {
+        case .completed(let resolvedTitle):
+            return .result(dialog: IntentDialog("Marked \(resolvedTitle) complete."))
+        case .alreadyCompleted(let resolvedTitle):
+            return .result(dialog: IntentDialog("\(resolvedTitle) is already marked complete."))
+        case .notFound:
+            return .result(dialog: IntentDialog("I couldn't find an existing task with that title for the current account."))
+        }
+    }
+}
+
+struct ReadMyTasksIntent: AppIntent {
+    static let title: LocalizedStringResource = "Read My Tasks"
+    static let description = IntentDescription("Reads the current user's assigned tasks from ARC Link.")
+    static let openAppWhenRun = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        .result(dialog: currentUserTasksDialog(defaults: arcLinkActiveUserDefaults()))
+    }
+}
+
+struct AssignTaskToCrewMemberIntent: AppIntent {
+    static let title: LocalizedStringResource = "Create and Assign Task"
+    static let description = IntentDescription("Creates a section task and assigns it to a crew member for the current Crew Lead account.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "New Task Title")
+    var taskTitle: String
+
+    @Parameter(title: "Crew Member")
+    var crewMemberName: String
+
+    @Parameter(title: "Due Date")
+    var dueDate: Date?
+
+    @Parameter(title: "Section Name")
+    var sectionName: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Create \(\.$taskTitle) for \(\.$crewMemberName)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let cleanedTaskTitle = taskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedCrewMemberName = crewMemberName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanedTaskTitle.isEmpty else {
+            return .result(dialog: "The task title can't be empty.")
+        }
+        guard !cleanedCrewMemberName.isEmpty else {
+            return .result(dialog: "The crew member name can't be empty.")
+        }
+
+        let defaults = arcLinkActiveUserDefaults()
+        guard let statusMessage = assignTaskToCrewMember(
+            title: cleanedTaskTitle,
+            crewMemberName: cleanedCrewMemberName,
+            dueDate: dueDate,
+            sectionName: sectionName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            defaults: defaults
+        ) else {
+            return .result(dialog: "I couldn't find that crew member in your sections. This shortcut creates a new task and assigns it.")
+        }
+
+        return .result(dialog: IntentDialog(stringLiteral: statusMessage))
+    }
+}
+
+struct ARCLinkShortcutsProvider: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: AddPersonalTodoIntent(),
+            phrases: [
+                "Add a personal to-do with \(.applicationName)",
+                "Create a personal to-do with \(.applicationName)",
+                "Add a to-do with \(.applicationName)"
+            ],
+            shortTitle: "Add To-Do",
+            systemImageName: "plus.circle"
+        )
+        AppShortcut(
+            intent: CompleteTaskIntent(),
+            phrases: [
+                "Mark an existing task complete with \(.applicationName)",
+                "Finish an existing task with \(.applicationName)"
+            ],
+            shortTitle: "Complete Task",
+            systemImageName: "checkmark.circle"
+        )
+        AppShortcut(
+            intent: ReadMyTasksIntent(),
+            phrases: [
+                "Read my tasks with \(.applicationName)",
+                "What are my tasks with \(.applicationName)",
+                "Show my tasks with \(.applicationName)"
+            ],
+            shortTitle: "Read My Tasks",
+            systemImageName: "list.bullet.clipboard"
+        )
+        AppShortcut(
+            intent: AssignTaskToCrewMemberIntent(),
+            phrases: [
+                "Dispatch crew work with \(.applicationName)",
+                "Send a work order with \(.applicationName)",
+                "Assign crew work with \(.applicationName)"
+            ],
+            shortTitle: "Dispatch Work",
+            systemImageName: "person.badge.plus"
+        )
+    }
+
+    static var shortcutTileColor: ShortcutTileColor {
+        .orange
     }
 }

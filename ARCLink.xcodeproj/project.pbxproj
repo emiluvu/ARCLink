@@ -292,7 +292,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "ARCLink-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = ARCLink;
+				INFOPLIST_KEY_CFBundleDisplayName = "ARC Link";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Connect to visor";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Connect to visor";
@@ -330,7 +330,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "ARCLink-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = ARCLink;
+				INFOPLIST_KEY_CFBundleDisplayName = "ARC Link";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Connect to visor";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Connect to visor";
