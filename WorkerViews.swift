@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 struct WorkerSectionTaskItem: Identifiable {
     let sectionID: UUID
@@ -146,6 +147,12 @@ struct WorkerHomeView: View {
                             .foregroundStyle(Color.arcAccentOrange)
                     }
                     .buttonStyle(.plain)
+
+                    NavigationLink {
+                        AirQualityMonitorView()
+                    } label: {
+                        Label(localized("Air Quality Data", language), systemImage: "aqi.medium")
+                    }
                 }
 
                 if currentSection?.featureSettings.timeClockEnabled ?? true {
@@ -617,6 +624,15 @@ public struct ARCVisorHubView: View {
         bluetoothManager.isConnected() ? .green : .secondary
     }
 
+    private var latestVisorPayload: String? {
+        bluetoothManager.deviceDataString
+    }
+
+    private var latestVisorReading: AirQualityReading? {
+        guard let latestVisorPayload else { return nil }
+        return decodeAirQualityReading(from: latestVisorPayload)
+    }
+
     public var body: some View {
         List {
             Section {
@@ -638,9 +654,16 @@ public struct ARCVisorHubView: View {
                 ).foregroundStyle(connectionStatusColor)
 
                 if bluetoothManager.isConnected() {
-                    let latestPayload = bluetoothManager.deviceDataString
+                    if let batteryLevel = latestVisorReading?.battery {
+                        HStack {
+                            Text(localized("Visor Battery", language))
+                            Spacer()
+                            Text("\(Int(batteryLevel.rounded()))%")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
 
-                    if let payload = latestPayload {
+                    if let payload = latestVisorPayload {
                         Text(payload)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -853,6 +876,328 @@ private struct ARCVisorDisplayPreviewView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(localized("Display Preview", language))
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct AirQualityMonitorView: View {
+    private struct SensorWarning: Identifiable {
+        enum Severity {
+            case advisory
+            case caution
+            case danger
+
+            var tint: Color {
+                switch self {
+                case .advisory:
+                    return .yellow
+                case .caution:
+                    return .orange
+                case .danger:
+                    return .red
+                }
+            }
+
+            var systemImage: String {
+                switch self {
+                case .advisory:
+                    return "exclamationmark.circle.fill"
+                case .caution:
+                    return "exclamationmark.triangle.fill"
+                case .danger:
+                    return "exclamationmark.octagon.fill"
+                }
+            }
+        }
+
+        let title: String
+        let message: String
+        let severity: Severity
+
+        var id: String { "\(title)-\(message)" }
+    }
+
+    private enum SensorPollingMode: String, CaseIterable, Identifiable {
+        case standard
+        case elevated
+        case continuous
+
+        var id: String { rawValue }
+
+        var intervalSeconds: Double {
+            switch self {
+            case .standard:
+                return 60
+            case .elevated:
+                return 30
+            case .continuous:
+                return 15
+            }
+        }
+
+        func title(for language: AppLanguage) -> String {
+            switch self {
+            case .standard:
+                return localized("Standard (60s)", language)
+            case .elevated:
+                return localized("Elevated (30s)", language)
+            case .continuous:
+                return localized("Continuous (15s)", language)
+            }
+        }
+    }
+
+    @Environment(BluetoothManager.self) private var bluetoothManager
+    @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
+    @State private var statusMessage = ""
+    @State private var pollingMode: SensorPollingMode = .standard
+
+    private var language: AppLanguage {
+        AppLanguage(rawValue: profileLanguageRawValue) ?? .english
+    }
+
+    private var latestPayload: String? {
+        bluetoothManager.deviceDataString
+    }
+
+    private var latestReading: AirQualityReading? {
+        guard let latestPayload else { return nil }
+        return decodeAirQualityReading(from: latestPayload)
+    }
+
+    private var activeWarnings: [SensorWarning] {
+        guard let latestReading else { return [] }
+
+        var warnings: [SensorWarning] = []
+
+        if let carbon = latestReading.carbon {
+            if carbon >= 2_000 {
+                warnings.append(
+                    SensorWarning(
+                        title: localized("Air Quality Warning", language),
+                        message: localized("Carbon is very high (\(String(format: "%.0f", carbon)) ppm). Move workers to fresh air and check the area immediately.", language),
+                        severity: .danger
+                    )
+                )
+            } else if carbon >= 1_000 {
+                warnings.append(
+                    SensorWarning(
+                        title: localized("Air Quality Warning", language),
+                        message: localized("Carbon is elevated (\(String(format: "%.0f", carbon)) ppm). Increase ventilation and keep monitoring conditions.", language),
+                        severity: .caution
+                    )
+                )
+            } else if carbon >= 800 {
+                warnings.append(
+                    SensorWarning(
+                        title: localized("Air Quality Notice", language),
+                        message: localized("Carbon is trending upward (\(String(format: "%.0f", carbon)) ppm). Watch for worsening ventilation.", language),
+                        severity: .advisory
+                    )
+                )
+            }
+        }
+
+        if let temperatureCelsius = latestReading.temperature {
+            let temperatureFahrenheit = (temperatureCelsius * 9 / 5) + 32
+
+            if temperatureFahrenheit >= 103 {
+                warnings.append(
+                    SensorWarning(
+                        title: localized("Heat Warning", language),
+                        message: localized("Extreme heat detected (\(String(format: "%.1f", temperatureCelsius)) C / \(String(format: "%.1f", temperatureFahrenheit)) F). Stop heavy work, cool down, hydrate, and check workers now.", language),
+                        severity: .danger
+                    )
+                )
+            } else if temperatureFahrenheit >= 95 {
+                warnings.append(
+                    SensorWarning(
+                        title: localized("Heat Warning", language),
+                        message: localized("High heat detected (\(String(format: "%.1f", temperatureCelsius)) C / \(String(format: "%.1f", temperatureFahrenheit)) F). Add rest, shade, and water breaks.", language),
+                        severity: .caution
+                    )
+                )
+            } else if temperatureFahrenheit >= 88 {
+                warnings.append(
+                    SensorWarning(
+                        title: localized("Heat Notice", language),
+                        message: localized("Warm conditions detected (\(String(format: "%.1f", temperatureCelsius)) C / \(String(format: "%.1f", temperatureFahrenheit)) F). Monitor workers for early signs of heat stress.", language),
+                        severity: .advisory
+                    )
+                )
+            }
+        }
+
+        return warnings
+    }
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(localized("Air Quality Data", language))
+                        .font(.largeTitle.weight(.bold))
+                    Text(localized("Use this screen to confirm the Raspberry Pi is sending carbon, temperature, and humidity JSON over Bluetooth.", language))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section(localized("Connection", language)) {
+                Label(
+                    bluetoothManager.isConnected() ? localized("Connected!", language) : localized("Not Connected", language),
+                    systemImage: bluetoothManager.isConnected() ? "checkmark.circle.fill" : "dot.radiowaves.left.and.right"
+                )
+                .foregroundStyle(bluetoothManager.isConnected() ? .green : .secondary)
+
+                if let lastReceivedAt = bluetoothManager.lastReceivedAt {
+                    Text("\(localized("Last Sensor Update", language)): \(lastReceivedAt.formatted(date: .abbreviated, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(localized("No sensor data has been received yet.", language))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(localized("Request Latest Air Quality Reading", language)) {
+                    requestLatestReading()
+                }
+                .disabled(!bluetoothManager.isConnected())
+
+                Picker(localized("Auto Refresh", language), selection: $pollingMode) {
+                    ForEach(SensorPollingMode.allCases) { mode in
+                        Text(mode.title(for: language)).tag(mode)
+                    }
+                }
+
+                Text(
+                    localized(
+                        "ARCLink automatically requests updated sensor data every \(Int(pollingMode.intervalSeconds)) seconds while this screen is open.",
+                        language
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if !statusMessage.isEmpty {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section(localized("Sensor Readings", language)) {
+                sensorValueRow(
+                    title: localized("Carbon", language),
+                    valueText: latestReading?.carbon.map { String(format: "%.2f ppm", $0) } ?? localized("Unavailable", language)
+                )
+                sensorValueRow(
+                    title: localized("Temperature", language),
+                    valueText: latestReading?.temperature.map { temperatureCelsius in
+                        let temperatureFahrenheit = (temperatureCelsius * 9 / 5) + 32
+                        return String(
+                            format: "%.2f C (%.2f F)",
+                            temperatureCelsius,
+                            temperatureFahrenheit
+                        )
+                    } ?? localized("Unavailable", language)
+                )
+                sensorValueRow(
+                    title: localized("Humidity", language),
+                    valueText: latestReading?.humidity.map { String(format: "%.2f %%", $0) } ?? localized("Unavailable", language)
+                )
+
+                if let latestReading, !latestReading.hasAnyReading {
+                    Text(localized("JSON received, but the expected air quality keys were not found.", language))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !activeWarnings.isEmpty {
+                Section(localized("Warnings", language)) {
+                    ForEach(activeWarnings) { warning in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: warning.severity.systemImage)
+                                .foregroundStyle(warning.severity.tint)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(warning.title)
+                                    .font(.headline)
+                                Text(warning.message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+
+            Section(localized("Raw JSON", language)) {
+                if let latestPayload {
+                    Text(latestPayload)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                } else {
+                    Text(localized("No JSON payload received yet.", language))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle(localized("Air Quality Data", language))
+        .listStyle(.insetGrouped)
+        .task(id: pollingMode) {
+            await startAutomaticPolling()
+        }
+    }
+
+    @ViewBuilder
+    private func sensorValueRow(title: String, valueText: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(valueText)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func requestLatestReading() {
+        do {
+            try bluetoothManager.read()
+            statusMessage = localized("Requested the latest air quality reading from the Raspberry Pi.", language)
+            
+            let data = bluetoothManager.deviceDataString ?? "[No data!]"
+            Logger().info("Got: \(data)")
+        } catch BluetoothError.noDevice {
+            statusMessage = localized("No Raspberry Pi Bluetooth device connected.", language)
+        } catch BluetoothError.noCharacteristic {
+            statusMessage = localized("Connected device is missing the Bluetooth characteristic.", language)
+        } catch {
+            statusMessage = localized("Failed to request air quality data.", language)
+        }
+    }
+
+    @MainActor
+    private func requestLatestReadingAutomatically() {
+        guard bluetoothManager.isConnected() else { return }
+
+        do {
+            try bluetoothManager.read()
+        } catch {
+            Logger().error("Automatic sensor refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    private func startAutomaticPolling() async {
+        requestLatestReadingAutomatically()
+
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(pollingMode.intervalSeconds))
+            guard !Task.isCancelled else { return }
+            requestLatestReadingAutomatically()
+        }
     }
 }
 

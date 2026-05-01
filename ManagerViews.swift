@@ -425,6 +425,12 @@ struct ManagerHomeView: View {
                     .foregroundStyle(Color.arcAccentOrange)
             }
             .buttonStyle(.plain)
+
+            NavigationLink {
+                AirQualityMonitorView()
+            } label: {
+                Label(localized("Air Quality Data", language), systemImage: "aqi.medium")
+            }
         }
     }
 

@@ -53,6 +53,52 @@ enum AuthTab: String, CaseIterable, Identifiable {
     }
 }
 
+struct AirQualityReading {
+    let battery: Double?
+    let carbon: Double?
+    let temperature: Double?
+    let humidity: Double?
+    let rawValues: [String: String]
+
+    var hasAnyReading: Bool {
+        battery != nil || carbon != nil || temperature != nil || humidity != nil
+    }
+}
+
+func decodeAirQualityReading(from rawJSONString: String) -> AirQualityReading? {
+    guard let data = rawJSONString.data(using: .utf8),
+          let jsonObject = try? JSONSerialization.jsonObject(with: data),
+          let dictionary = jsonObject as? [String: Any] else {
+        return nil
+    }
+
+    func value(forKeys keys: [String]) -> Double? {
+        for key in keys {
+            guard let rawValue = dictionary[key] else { continue }
+            if let number = rawValue as? NSNumber {
+                return number.doubleValue
+            }
+            if let string = rawValue as? String,
+               let number = Double(string.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return number
+            }
+        }
+        return nil
+    }
+
+    let normalizedRawValues = dictionary.reduce(into: [String: String]()) { partialResult, entry in
+        partialResult[entry.key] = String(describing: entry.value)
+    }
+
+    return AirQualityReading(
+        battery: value(forKeys: ["battery", "batteryLevel", "battery_level"]),
+        carbon: value(forKeys: ["carbon", "co2", "carbonDioxide", "carbon_dioxide"]),
+        temperature: value(forKeys: ["temperature", "temp"]),
+        humidity: value(forKeys: ["humidity", "hum"]),
+        rawValues: normalizedRawValues
+    )
+}
+
 struct ManagerSection: Identifiable, Codable {
     let id: UUID
     var ownerAccountID: String?

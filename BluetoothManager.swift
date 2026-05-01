@@ -40,6 +40,8 @@ final class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDe
         }
     }
 
+    private(set) var lastReceivedAt: Date? = nil
+
     /**
      * Creates a new ``BluetoothManager`` which will, on Bluetooth power on, scan for and connect to
      * a device advertising a service with UUID ``UUID_SERVICE`` with a characteristic with UUID
@@ -252,6 +254,7 @@ final class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDe
     
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: (any Error)?) {
         deviceRawData = characteristic.value
+        lastReceivedAt = Date()
     }
     
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: (any Error)?) {
@@ -274,6 +277,10 @@ final class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDe
         
         logger.info("Found characteristic!")
         self.deviceCharacteristic = characteristic
+        if characteristic.properties.contains(.notify) || characteristic.properties.contains(.indicate) {
+            peripheral.setNotifyValue(true, for: characteristic)
+        }
+        peripheral.readValue(for: characteristic)
     }
 }
 
