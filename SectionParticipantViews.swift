@@ -142,6 +142,9 @@ struct ManagerAssignedSectionDashboardView: View {
                                             },
                                             onSavePrivateNote: { note in
                                                 setWorkerPrivateNote(note, for: task.id)
+                                            },
+                                            onAddSharedPhoto: { attachment in
+                                                addTaskAttachment(attachment, to: task.id)
                                             }
                                         )
                                     } label: {
@@ -295,6 +298,17 @@ struct ManagerAssignedSectionDashboardView: View {
             sections[sectionIndex].sectionTasks[taskIndex].doneMemberIDs.removeAll(where: { $0 == memberID })
             sections[sectionIndex].sectionTasks[taskIndex].verifiedMemberIDs.removeAll(where: { $0 == memberID })
         }
+        managerSectionsRaw = encodeSections(sections)
+    }
+
+    private func addTaskAttachment(_ attachment: TaskAttachment, to taskID: UUID) {
+        guard let section = currentSection else { return }
+
+        var sections = decodeSections(from: managerSectionsRaw)
+        guard let sectionIndex = sections.firstIndex(where: { $0.id == section.id }),
+              let taskIndex = sections[sectionIndex].sectionTasks.firstIndex(where: { $0.id == taskID }) else { return }
+
+        sections[sectionIndex].sectionTasks[taskIndex].attachments.append(attachment)
         managerSectionsRaw = encodeSections(sections)
     }
 

@@ -220,6 +220,9 @@ struct WorkerHomeView: View {
                                             },
                                             onSavePrivateNote: { note in
                                                 setWorkerPrivateNote(note, for: taskItem.task.id)
+                                            },
+                                            onAddSharedPhoto: { attachment in
+                                                addTaskAttachment(attachment, to: taskItem)
                                             }
                                         )
                                     } label: {
@@ -432,6 +435,15 @@ struct WorkerHomeView: View {
             sections[sectionIndex].sectionTasks[taskIndex].doneMemberIDs.removeAll(where: { $0 == taskItem.memberID })
             sections[sectionIndex].sectionTasks[taskIndex].verifiedMemberIDs.removeAll(where: { $0 == taskItem.memberID })
         }
+        managerSectionsRaw = encodeSections(sections)
+    }
+
+    private func addTaskAttachment(_ attachment: TaskAttachment, to taskItem: WorkerSectionTaskItem) {
+        var sections = decodeSections(from: managerSectionsRaw)
+        guard let sectionIndex = sections.firstIndex(where: { $0.id == taskItem.sectionID }),
+              let taskIndex = sections[sectionIndex].sectionTasks.firstIndex(where: { $0.id == taskItem.task.id }) else { return }
+
+        sections[sectionIndex].sectionTasks[taskIndex].attachments.append(attachment)
         managerSectionsRaw = encodeSections(sections)
     }
 
@@ -681,6 +693,7 @@ public struct ARCVisorHubView: View {
                 }
                 .disabled(!bluetoothManager.isConnected())
             }
+            .walkthroughTarget(.arcVisorConnection)
 
             Section(localized("What ARCVisor Will Do", language)) {
                 Text(localized("Show section tasks, crew locations, and pinned updates in an AR visor view.", language))
@@ -1085,6 +1098,7 @@ struct AirQualityMonitorView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .walkthroughTarget(.airQualityConnection)
 
             Section(localized("Sensor Readings", language)) {
                 sensorValueRow(
@@ -1752,9 +1766,29 @@ public struct WorkerTaskDetailView: View {
     let privateNote: String
     let onToggleCompleted: (Bool) -> Void
     let onSavePrivateNote: (String) -> Void
+    let onAddSharedPhoto: ((TaskAttachment) -> Void)?
     
     @State private var completedState = false
     @State private var privateNoteDraft = ""
+    @State private var showTaskPhotoPicker = false
+
+    init(
+        task: SectionTask,
+        isCompleted: Bool,
+        isVerified: Bool,
+        privateNote: String,
+        onToggleCompleted: @escaping (Bool) -> Void,
+        onSavePrivateNote: @escaping (String) -> Void,
+        onAddSharedPhoto: ((TaskAttachment) -> Void)? = nil
+    ) {
+        self.task = task
+        self.isCompleted = isCompleted
+        self.isVerified = isVerified
+        self.privateNote = privateNote
+        self.onToggleCompleted = onToggleCompleted
+        self.onSavePrivateNote = onSavePrivateNote
+        self.onAddSharedPhoto = onAddSharedPhoto
+    }
     
     public var body: some View {
         List {
@@ -1800,10 +1834,25 @@ public struct WorkerTaskDetailView: View {
                 }
             }
             
-            if !task.attachments.isEmpty {
+            if !task.attachments.isEmpty || onAddSharedPhoto != nil {
                 Section("Attachments") {
-                    ForEach(task.attachments) { attachment in
-                        Label(attachment.label, systemImage: attachment.type.systemImage)
+                    if task.attachments.isEmpty {
+                        Text("No attachments yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(task.attachments) { attachment in
+                            TaskAttachmentPreviewRow(attachment: attachment)
+                        }
+                    }
+
+                    if onAddSharedPhoto != nil {
+                        Button("Add Shared Photo") {
+                            showTaskPhotoPicker = true
+                        }
+
+                        Text("Attached task photos are visible to everyone assigned to this task.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -1846,6 +1895,11 @@ public struct WorkerTaskDetailView: View {
         .onAppear {
             completedState = isCompleted
             privateNoteDraft = privateNote
+        }
+        .sheet(isPresented: $showTaskPhotoPicker) {
+            TaskPhotoPicker { attachment in
+                onAddSharedPhoto?(attachment)
+            }
         }
     }
 }

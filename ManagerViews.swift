@@ -41,6 +41,8 @@ struct ManagerLeadershipTodoItem: Identifiable {
 
 struct ManagerHomeView: View {
     let profileName: String
+    let walkthroughDestination: DemoDestination
+    let walkthroughFocusTarget: WalkthroughTargetID?
     let onSignOut: () -> Void
 
     @Environment(BluetoothManager.self) private var bluetoothManager
@@ -72,6 +74,10 @@ struct ManagerHomeView: View {
     @State private var newManagerTodoDueDate = Date()
     @State private var newManagerTodoPriority: TaskPriority = .medium
     @State private var newManagerTodoNotes = ""
+    @State private var showWalkthroughARCVisor = false
+    @State private var showWalkthroughAirQuality = false
+    @State private var showWalkthroughProfile = false
+    @State private var walkthroughSectionID: UUID?
 
     private var language: AppLanguage {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
@@ -201,41 +207,63 @@ struct ManagerHomeView: View {
         }
     }
 
+    init(
+        profileName: String,
+        walkthroughDestination: DemoDestination = .home,
+        walkthroughFocusTarget: WalkthroughTargetID? = nil,
+        onSignOut: @escaping () -> Void
+    ) {
+        self.profileName = profileName
+        self.walkthroughDestination = walkthroughDestination
+        self.walkthroughFocusTarget = walkthroughFocusTarget
+        self.onSignOut = onSignOut
+    }
+
     var body: some View {
         NavigationView {
-            List {
-                managerHeaderSection
-                managerARCVisorSection
-                managerOverallTodoSection
-                managerManagedSectionsSection
-                managerLeadershipSectionsSection
-                managerProfileSection
+            ScrollViewReader { scrollProxy in
+                List {
+                    managerHeaderSection
+                    managerARCVisorSection
+                    managerOverallTodoSection
+                    managerManagedSectionsSection
+                    managerLeadershipSectionsSection
+                    managerProfileSection
+                }
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("Sign Out") {
+                            onSignOut()
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            resetManagerTodoComposer()
+                            showAddPersonalTodoSheet = true
+                        } label: {
+                            Image(systemName: "checklist.checked")
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            showCreateSectionSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .onAppear {
+                    scrollToWalkthroughTarget(using: scrollProxy)
+                }
+                .onChange(of: walkthroughFocusTarget) {
+                    scrollToWalkthroughTarget(using: scrollProxy)
+                    applyWalkthroughDestination(walkthroughDestination)
+                }
+                .background(walkthroughNavigationLinks)
             }
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Sign Out") {
-                        onSignOut()
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        resetManagerTodoComposer()
-                        showAddPersonalTodoSheet = true
-                    } label: {
-                        Image(systemName: "checklist.checked")
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showCreateSectionSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
-            .listStyle(.insetGrouped)
             .sheet(isPresented: $showCreateSectionSheet) {
                 NavigationView {
                     Form {
@@ -398,10 +426,73 @@ struct ManagerHomeView: View {
             seedDemoSectionIfNeeded()
             seedDemoLeadershipAssignmentIfNeeded()
             managerSections = ownedSectionsFromStorage()
+            applyWalkthroughDestination(walkthroughDestination)
+        }
+        .onChange(of: walkthroughDestination) {
+            applyWalkthroughDestination(walkthroughDestination)
         }
         .onChange(of: managerSectionsRaw) { newValue in
             managerSections = ownedSections(from: newValue)
         }
+    }
+
+    @ViewBuilder
+    private var walkthroughNavigationLinks: some View {
+        NavigationLink(
+            isActive: $showWalkthroughARCVisor,
+            destination: {
+                ARCVisorHubView(payloadContext: arcVisorPayloadContext)
+                    .environment(bluetoothManager)
+            },
+            label: { EmptyView() }
+        )
+        .hidden()
+
+        NavigationLink(
+            isActive: $showWalkthroughAirQuality,
+            destination: {
+                AirQualityMonitorView()
+            },
+            label: { EmptyView() }
+        )
+        .hidden()
+
+        NavigationLink(
+            isActive: $showWalkthroughProfile,
+            destination: {
+                ManagerProfileDetailView(
+                    profileName: profileName,
+                    profileAccountID: profileAccountID,
+                    profilePhoneNumber: profilePhoneNumber,
+                    profileEmail: profileEmail,
+                    walkthroughFocusTarget: walkthroughFocusTarget
+                )
+            },
+            label: { EmptyView() }
+        )
+        .hidden()
+
+        NavigationLink(
+            isActive: Binding(
+                get: { walkthroughSectionID != nil },
+                set: { isActive in
+                    if !isActive {
+                        walkthroughSectionID = nil
+                    }
+                }
+            ),
+            destination: {
+                if let walkthroughSectionID {
+                    ManagedSectionHostView(
+                        sectionID: walkthroughSectionID,
+                        walkthroughDestination: walkthroughDestination,
+                        walkthroughFocusTarget: walkthroughFocusTarget
+                    )
+                }
+            },
+            label: { EmptyView() }
+        )
+        .hidden()
     }
 
     private var managerHeaderSection: some View {
@@ -425,12 +516,16 @@ struct ManagerHomeView: View {
                     .foregroundStyle(Color.arcAccentOrange)
             }
             .buttonStyle(.plain)
+            .id(WalkthroughTargetID.arcVisorButton.rawValue)
+            .walkthroughTarget(.arcVisorButton)
 
             NavigationLink {
                 AirQualityMonitorView()
             } label: {
                 Label(localized("Air Quality Data", language), systemImage: "aqi.medium")
             }
+            .id(WalkthroughTargetID.airQualityButton.rawValue)
+            .walkthroughTarget(.airQualityButton)
         }
     }
 
@@ -501,6 +596,8 @@ struct ManagerHomeView: View {
                 }
             } label: {
                 Text(localized("Overall To-Do List", language))
+                    .id(WalkthroughTargetID.overallTodos.rawValue)
+                    .walkthroughTarget(.overallTodos)
             }
         }
     }
@@ -512,7 +609,10 @@ struct ManagerHomeView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach($managerSections) { $section in
-                    managedSectionRow($section)
+                    managedSectionRow(
+                        $section,
+                        isPrimaryWalkthroughSection: section.id == managerSections.first?.id
+                    )
                 }
             }
         }
@@ -564,6 +664,8 @@ struct ManagerHomeView: View {
                 .buttonStyle(.plain)
             }
         }
+        .id(WalkthroughTargetID.leadershipSections.rawValue)
+        .walkthroughTarget(.leadershipSections)
     }
 
     private var managerProfileSection: some View {
@@ -579,10 +681,12 @@ struct ManagerHomeView: View {
                 Label(localized("My Profile", language), systemImage: "person.crop.circle")
             }
         }
+        .id(WalkthroughTargetID.profile.rawValue)
+        .walkthroughTarget(.profile)
     }
 
     @ViewBuilder
-    private func managedSectionRow(_ section: Binding<ManagerSection>) -> some View {
+    private func managedSectionRow(_ section: Binding<ManagerSection>, isPrimaryWalkthroughSection: Bool) -> some View {
         let childSections = subsections(for: section.wrappedValue.id)
         DisclosureGroup(
             isExpanded: Binding(
@@ -634,12 +738,30 @@ struct ManagerHomeView: View {
                         Label(section.wrappedValue.codeWord, systemImage: "key.fill")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
+                            .id(
+                                isPrimaryWalkthroughSection
+                                ? WalkthroughTargetID.managedSectionCode.rawValue
+                                : "managed-section-code-\(section.wrappedValue.id.uuidString)"
+                            )
+                            .walkthroughTarget(isPrimaryWalkthroughSection ? .managedSectionCode : nil)
                     }
                     Text("\(section.wrappedValue.members.count) crews • \(section.wrappedValue.groupChats.count) group chats")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .id(
+                            isPrimaryWalkthroughSection
+                            ? WalkthroughTargetID.managedSectionSummary.rawValue
+                            : "managed-section-summary-\(section.wrappedValue.id.uuidString)"
+                        )
+                        .walkthroughTarget(isPrimaryWalkthroughSection ? .managedSectionSummary : nil)
                 }
                 .padding(.vertical, 2)
+                .id(
+                    isPrimaryWalkthroughSection
+                    ? WalkthroughTargetID.managedSectionCard.rawValue
+                    : "managed-section-\(section.wrappedValue.id.uuidString)"
+                )
+                .walkthroughTarget(isPrimaryWalkthroughSection ? .managedSectionCard : nil)
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -654,6 +776,61 @@ struct ManagerHomeView: View {
             Button("Delete", role: .destructive) {
                 deleteSection(id: section.wrappedValue.id)
             }
+        }
+    }
+
+    private func scrollToWalkthroughTarget(using scrollProxy: ScrollViewProxy) {
+        guard let walkthroughFocusTarget else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                scrollProxy.scrollTo(walkthroughFocusTarget.rawValue, anchor: .center)
+            }
+        }
+    }
+
+    private func applyWalkthroughDestination(_ destination: DemoDestination) {
+        if walkthroughFocusTarget == .overallTodos {
+            isOverallTodoExpanded = true
+        } else if walkthroughFocusTarget != nil {
+            isOverallTodoExpanded = false
+        }
+
+        switch destination {
+        case .home:
+            showARCVisor = false
+            showWalkthroughARCVisor = false
+            showWalkthroughAirQuality = false
+            showWalkthroughProfile = false
+            walkthroughSectionID = nil
+        case .arcVisor:
+            showARCVisor = false
+            showWalkthroughARCVisor = true
+            showWalkthroughAirQuality = false
+            showWalkthroughProfile = false
+            walkthroughSectionID = nil
+        case .airQuality:
+            showARCVisor = false
+            showWalkthroughARCVisor = false
+            showWalkthroughProfile = false
+            walkthroughSectionID = nil
+            showWalkthroughAirQuality = true
+        case .profile:
+            showARCVisor = false
+            showWalkthroughARCVisor = false
+            showWalkthroughAirQuality = false
+            walkthroughSectionID = nil
+            showWalkthroughProfile = true
+        case .sectionDetail(let sectionID),
+             .sectionTasks(let sectionID),
+             .sectionMembers(let sectionID),
+             .sectionChats(let sectionID),
+             .sectionTimeClock(let sectionID),
+             .sectionSettings(let sectionID):
+            showARCVisor = false
+            showWalkthroughARCVisor = false
+            showWalkthroughAirQuality = false
+            showWalkthroughProfile = false
+            walkthroughSectionID = sectionID
         }
     }
 
@@ -957,6 +1134,21 @@ struct ManagerProfileDetailView: View {
     let profileAccountID: String
     let profilePhoneNumber: String
     let profileEmail: String
+    let walkthroughFocusTarget: WalkthroughTargetID?
+
+    init(
+        profileName: String,
+        profileAccountID: String,
+        profilePhoneNumber: String,
+        profileEmail: String,
+        walkthroughFocusTarget: WalkthroughTargetID? = nil
+    ) {
+        self.profileName = profileName
+        self.profileAccountID = profileAccountID
+        self.profilePhoneNumber = profilePhoneNumber
+        self.profileEmail = profileEmail
+        self.walkthroughFocusTarget = walkthroughFocusTarget
+    }
 
     @AppStorage("profileAccountID") private var savedProfileAccountID = ""
     @AppStorage("profilePhoneNumber") private var savedProfilePhoneNumber = ""
@@ -1028,6 +1220,7 @@ struct ManagerProfileDetailView: View {
                 }
                 .disabled(selectedLanguage.rawValue == savedProfileLanguageRawValue)
             }
+            .walkthroughTarget(walkthroughFocusTarget == .profileSettings ? .profileSettings : nil)
 
             Section(localized("Change Password", language)) {
                 SecureField(localized("Current password", language), text: $currentPasswordDraft)
@@ -1129,6 +1322,8 @@ struct ManagedSectionHostView: View {
     }
 
     let sectionID: UUID
+    let walkthroughDestination: DemoDestination
+    let walkthroughFocusTarget: WalkthroughTargetID?
 
     @AppStorage("managerSectionsJSON") private var managerSectionsRaw = ""
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
@@ -1136,6 +1331,16 @@ struct ManagedSectionHostView: View {
 
     private var language: AppLanguage {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
+    }
+
+    init(
+        sectionID: UUID,
+        walkthroughDestination: DemoDestination = .home,
+        walkthroughFocusTarget: WalkthroughTargetID? = nil
+    ) {
+        self.sectionID = sectionID
+        self.walkthroughDestination = walkthroughDestination
+        self.walkthroughFocusTarget = walkthroughFocusTarget
     }
 
     var body: some View {
@@ -1151,6 +1356,8 @@ struct ManagedSectionHostView: View {
     private func sectionDashboardContent(_ sectionBinding: Binding<ManagerSection>) -> some View {
         ManagerSectionDashboardView(
             section: sectionBinding,
+            walkthroughDestination: walkthroughDestination,
+            walkthroughFocusTarget: walkthroughFocusTarget,
             onSave: { },
             onOpenGroupChat: { selectedGroupChatRoute = SelectedGroupChatRoute(id: $0) }
         )
@@ -1237,6 +1444,8 @@ struct ManagerSectionDashboardView: View {
     }
 
     @Binding var section: ManagerSection
+    let walkthroughDestination: DemoDestination
+    let walkthroughFocusTarget: WalkthroughTargetID?
     let onSave: () -> Void
     let onOpenGroupChat: (UUID) -> Void
 
@@ -1268,6 +1477,7 @@ struct ManagerSectionDashboardView: View {
     @State private var selectedSectionTaskWeekAnchor = Date()
     @State private var areMembersExpanded = true
     @State private var areSubsectionsExpanded = true
+    @State private var walkthroughMemberID: UUID?
     @AppStorage("managerSectionsJSON") private var managerSectionsRaw = ""
     @AppStorage("managerCrewNicknamesJSON") private var managerCrewNicknamesRaw = ""
     @AppStorage("profileAccountID") private var profileAccountID = ""
@@ -1284,527 +1494,627 @@ struct ManagerSectionDashboardView: View {
     }
 
     var body: some View {
-        List {
-            Section(localized("Members", language)) {
-                DisclosureGroup(isExpanded: $areMembersExpanded) {
-                    if section.members.isEmpty {
-                        Text(localized("No crews have joined this section yet.", language))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach($section.members) { $member in
-                            NavigationLink {
-                                MemberDetailView(
-                                    member: $member,
-                                    sectionTasks: section.sectionTasks,
-                                    onSave: onSave
-                                )
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                            .font(.headline)
-                                        Spacer()
-                                        Text(member.role.title)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    HStack {
-                                        Text(member.phoneNumber)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Spacer()
-                                        Label(
-                                            member.isOnSite ? localized("On Site", language) : localized("Off Site", language),
-                                            systemImage: member.isOnSite ? "checkmark.seal.fill" : "xmark.seal"
-                                        )
-                                        .font(.caption)
-                                        .foregroundStyle(member.isOnSite ? .green : .secondary)
-                                    }
-                                    Text("\(localized("Section tasks", language)): \(assignedSectionTaskCount(for: member.id)) • \(localized("Personal to-dos", language)): \(member.todos.count)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    Text("\(localized("Completed", language)): \(completedSectionTaskCount(for: member.id))/\(assignedSectionTaskCount(for: member.id))")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Text(localized("Show Members", language))
+        ScrollViewReader { scrollProxy in
+            dashboardList
+                .navigationTitle(section.name)
+                .toolbar { dashboardToolbar }
+                .sheet(isPresented: $showSectionSettingsSheet) {
+                    sectionSettingsSheet
                 }
-            }
+                .sheet(isPresented: $showCreateSubsectionSheet) {
+                    subsectionComposer
+                }
+                .sheet(isPresented: $showCreateChatSheet) {
+                    groupChatComposer
+                }
+                .sheet(isPresented: $showAssignTaskSheet) {
+                    taskComposer
+                }
+                .sheet(isPresented: $showTaskMediaPicker) {
+                    MediaPicker(mediaType: selectedTaskAttachmentType == .video ? .video : .photo) { type, label in
+                        let attachmentType: TaskAttachmentType = type == .video ? .video : .photo
+                        newSectionTaskAttachments.append(TaskAttachment(type: attachmentType, label: label))
+                    }
+                }
+                .fileImporter(isPresented: $showTaskPDFImporter, allowedContentTypes: [.pdf]) { result in
+                    guard case .success(let url) = result else { return }
+                    newSectionTaskAttachments.append(TaskAttachment(type: .pdf, label: url.lastPathComponent))
+                }
+                .confirmationDialog(localized("Add Attachment", language), isPresented: $showTaskAttachmentTypeDialog) {
+                    Button(localized("Photo", language)) {
+                        selectedTaskAttachmentType = .photo
+                        showTaskMediaPicker = true
+                    }
+                    Button(localized("Video", language)) {
+                        selectedTaskAttachmentType = .video
+                        showTaskMediaPicker = true
+                    }
+                    Button("PDF") {
+                        showTaskPDFImporter = true
+                    }
+                    Button(localized("Cancel", language), role: .cancel) { }
+                }
+                .background(walkthroughMemberNavigationLink)
+                .onAppear {
+                    applyWalkthroughDestination(walkthroughDestination)
+                    scrollToWalkthroughTarget(using: scrollProxy)
+                }
+                .onChange(of: walkthroughDestination) {
+                    applyWalkthroughDestination(walkthroughDestination)
+                    scrollToWalkthroughTarget(using: scrollProxy)
+                }
+                .onChange(of: walkthroughFocusTarget) {
+                    scrollToWalkthroughTarget(using: scrollProxy)
+                }
+        }
+    }
 
-            Section {
-                DisclosureGroup(isExpanded: $areSubsectionsExpanded) {
-                    if subsections.isEmpty {
-                        Text(localized("No subsections yet.", language))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(subsections) { subsection in
-                            NavigationLink {
-                                ManagedSectionHostView(sectionID: subsection.id)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(subsection.name)
-                                            .font(.headline)
-                                        Spacer()
-                                        Label(subsection.codeWord, systemImage: "link")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text("\(subsection.members.count) crews • \(subsection.groupChats.count) group chats")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Text(localized("Show Subsections", language))
-                }
-            } header: {
-                HStack {
-                    Text(localized("Subsections", language))
-                    Spacer()
-                    Button {
-                        newSubsectionName = ""
-                        selectedSubsectionMemberIDs = []
-                        showCreateSubsectionSheet = true
-                    } label: {
-                        Image(systemName: "plus.circle")
-                    }
-                    .buttonStyle(.plain)
-                }
+    private var dashboardList: some View {
+        List {
+            membersSection
+            subsectionsSection
+            groupChatsSection
+            verificationAndTaskSections
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var dashboardToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button {
+                showSectionSettingsSheet = true
+            } label: {
+                Image(systemName: "gearshape")
             }
+            .id(WalkthroughTargetID.sectionFeatureControls.rawValue)
+            .walkthroughTarget(.sectionFeatureControls)
 
             if section.featureSettings.groupChatsEnabled {
-                Section(localized("Group Chats", language)) {
-                    if section.groupChats.isEmpty {
-                        Text(localized("No group chats yet. Tap + to create one.", language))
+                Button {
+                    showCreateChatSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+            }
+        }
+    }
+
+    private var sectionSettingsSheet: some View {
+        NavigationView {
+            SectionSettingsView(
+                section: $section,
+                onSave: onSave,
+                walkthroughFocusTarget: walkthroughFocusTarget
+            )
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private var subsectionComposer: some View {
+        NavigationView {
+            Form {
+                Section(localized("New Subsection", language)) {
+                    TextField(localized("Subsection name", language), text: $newSubsectionName)
+                        .textInputAutocapitalization(.words)
+                }
+
+                Section(localized("Add Members", language)) {
+                    if section.members.isEmpty {
+                        Text(localized("No members in parent section.", language))
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(section.groupChats) { chat in
+                        ForEach(section.members) { member in
                             Button {
-                                onOpenGroupChat(chat.id)
+                                toggleSubsectionMember(member.id)
                             } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(chat.name)
-                                        .font(.headline)
-                                    Text(latestMessagePreview(for: chat))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                        Text(member.role.title)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: selectedSubsectionMemberIDs.contains(member.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedSubsectionMemberIDs.contains(member.id) ? .green : .secondary)
                                 }
                             }
                             .buttonStyle(.plain)
                         }
-                        .onDelete(perform: deleteGroupChats)
+                    }
+                }
+
+                Section {
+                    Button(localized("Create Subsection", language)) {
+                        createSubsection()
+                    }
+                    .disabled(newSubsectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .navigationTitle(localized("Create Subsection", language))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(localized("Cancel", language)) {
+                        showCreateSubsectionSheet = false
+                        newSubsectionName = ""
+                        selectedSubsectionMemberIDs = []
                     }
                 }
             }
+        }
+        .navigationViewStyle(.stack)
+    }
 
-            if section.featureSettings.sectionTasksEnabled || section.featureSettings.personalTodosEnabled {
-                if !tasksAwaitingVerification.isEmpty || !personalTodosAwaitingVerification.isEmpty {
-                    Section(localized("To Verify", language)) {
-                        ForEach(tasksAwaitingVerification) { task in
-                            managerTaskNavigationRow(task)
+    private var groupChatComposer: some View {
+        NavigationView {
+            Form {
+                Section(localized("New Group Chat", language)) {
+                    TextField(localized("Group chat name", language), text: $newChatName)
+                        .textInputAutocapitalization(.words)
+                }
+
+                Section(localized("Add Members", language)) {
+                    if section.members.isEmpty {
+                        Text(localized("No section members available yet.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button(localized("Add All", language)) {
+                            selectAllGroupChatMembers()
                         }
-                        ForEach(personalTodosAwaitingVerification) { item in
-                            managerPersonalTodoVerificationRow(item)
+                        .buttonStyle(.bordered)
+                        .disabled(selectedGroupChatMemberIDs.count == section.members.count)
+
+                        ForEach(section.members) { member in
+                            Button {
+                                toggleGroupChatMember(member.id)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                        Text(member.role.title)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if selectedGroupChatMemberIDs.contains(member.id) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.green)
+                                    } else {
+                                        Image(systemName: "circle")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
 
-                if section.featureSettings.sectionTasksEnabled {
-                    Section {
-                    if section.sectionTasks.isEmpty {
-                        Text(localized("No section tasks yet.", language))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Picker(localized("Task View", language), selection: $sectionTaskViewMode) {
-                            ForEach(TaskTimelineView.allCases) { mode in
-                                Text(mode.title).tag(mode)
+                Section {
+                    Button(localized("Create Group Chat", language)) {
+                        createGroupChat()
+                    }
+                    .disabled(newChatName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .navigationTitle(localized("Create Group Chat", language))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(localized("Cancel", language)) {
+                        showCreateChatSheet = false
+                        newChatName = ""
+                        selectedGroupChatMemberIDs = []
+                    }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private var taskComposer: some View {
+        NavigationView {
+            Form {
+                Section(localized("Task Details", language)) {
+                    TextField(localized("Task title", language), text: $newSectionTaskTitle)
+                        .textInputAutocapitalization(.sentences)
+
+                    TextEditor(text: $newSectionTaskDescription)
+                        .frame(minHeight: 100)
+                        .overlay(alignment: .topLeading) {
+                            if newSectionTaskDescription.isEmpty {
+                                Text(localized("Description (use keyboard or dictation)", language))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 8)
+                                    .padding(.leading, 6)
                             }
                         }
-                        .pickerStyle(.segmented)
 
-                        if sectionTaskViewMode == .calendar {
-                            DatePicker(
-                                localized("Calendar", language),
-                                selection: $selectedSectionTaskDate,
-                                displayedComponents: .date
+                    Picker(localized("Priority", language), selection: $newSectionTaskPriority) {
+                        ForEach(TaskPriority.allCases) { priority in
+                            Text(priority.title).tag(priority)
+                        }
+                    }
+
+                    DatePicker(
+                        localized("Due Date", language),
+                        selection: $newSectionTaskDueDate,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+
+                    TextField(localized("Site", language), text: $newSectionTaskSiteName)
+                        .textInputAutocapitalization(.words)
+
+                    TextField(localized("Location (optional)", language), text: $newSectionTaskLocation)
+                        .textInputAutocapitalization(.words)
+
+                    Toggle(localized("Requires acknowledgement", language), isOn: $newSectionTaskRequiresAcknowledgement)
+                }
+
+                Section(localized("Checklist Items", language)) {
+                    HStack {
+                        TextField(localized("Checklist item", language), text: $newChecklistItemTitle)
+                            .textInputAutocapitalization(.sentences)
+
+                        Button(localized("Add", language)) {
+                            addChecklistItem()
+                        }
+                        .disabled(newChecklistItemTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    if newSectionTaskChecklistItems.isEmpty {
+                        Text(localized("No checklist items yet.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(newSectionTaskChecklistItems) { item in
+                            HStack {
+                                Text(item.title)
+                                Spacer()
+                                Button(localized("Delete", language), role: .destructive) {
+                                    newSectionTaskChecklistItems.removeAll(where: { $0.id == item.id })
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                Section(localized("Attachments", language)) {
+                    Button(localized("Add Attachment", language)) {
+                        showTaskAttachmentTypeDialog = true
+                    }
+
+                    if newSectionTaskAttachments.isEmpty {
+                        Text(localized("No attachments yet.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(newSectionTaskAttachments) { attachment in
+                            HStack {
+                                Label(attachment.label, systemImage: attachment.type.systemImage)
+                                Spacer()
+                                Button(localized("Delete", language), role: .destructive) {
+                                    newSectionTaskAttachments.removeAll(where: { $0.id == attachment.id })
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                Section(localized("Assign To", language)) {
+                    if section.members.isEmpty {
+                        Text(localized("No section members available.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button(localized("Add All", language)) {
+                            selectAllAssignees()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(selectedAssigneeIDs.count == section.members.count)
+
+                        ForEach(section.members) { member in
+                            Button {
+                                toggleAssignee(member.id)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                        Text(member.role.title)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if selectedAssigneeIDs.contains(member.id) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.green)
+                                    } else {
+                                        Image(systemName: "circle")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                Section {
+                    Button(localized("Create Task", language)) {
+                        createSectionTask()
+                    }
+                    .walkthroughTarget(walkthroughFocusTarget == .sectionTaskAddButton ? .sectionTaskAddButton : nil)
+                    .disabled(
+                        newSectionTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        selectedAssigneeIDs.isEmpty
+                    )
+                }
+            }
+            .navigationTitle(localized("Assign Task", language))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(localized("Cancel", language)) {
+                        resetTaskComposer()
+                        showAssignTaskSheet = false
+                    }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private var membersSection: some View {
+        Section(localized("Members", language)) {
+            DisclosureGroup(isExpanded: $areMembersExpanded) {
+                if section.members.isEmpty {
+                    Text(localized("No crews have joined this section yet.", language))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach($section.members) { $member in
+                        NavigationLink {
+                            MemberDetailView(
+                                member: $member,
+                                sectionTasks: section.sectionTasks,
+                                onSave: onSave
                             )
-                            .datePickerStyle(.graphical)
-
-                            let dailyTasks = sectionTasks(on: selectedSectionTaskDate)
-                            if dailyTasks.isEmpty {
-                                Text(localized("No tasks on this date.", language))
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(member.role.title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                HStack {
+                                    Text(member.phoneNumber)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Label(
+                                        member.isOnSite ? localized("On Site", language) : localized("Off Site", language),
+                                        systemImage: member.isOnSite ? "checkmark.seal.fill" : "xmark.seal"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(member.isOnSite ? .green : .secondary)
+                                }
+                                Text("\(localized("Section tasks", language)): \(assignedSectionTaskCount(for: member.id)) • \(localized("Personal to-dos", language)): \(member.todos.count)")
+                                    .font(.caption2)
                                     .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(dailyTasks) { task in
+                                Text("\(localized("Completed", language)): \(completedSectionTaskCount(for: member.id))/\(assignedSectionTaskCount(for: member.id))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text(localized("Show Members", language))
+            }
+        }
+        .id(WalkthroughTargetID.sectionMembers.rawValue)
+        .walkthroughTarget(.sectionMembers)
+    }
+
+    private var subsectionsSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $areSubsectionsExpanded) {
+                if subsections.isEmpty {
+                    Text(localized("No subsections yet.", language))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(subsections) { subsection in
+                        NavigationLink {
+                            ManagedSectionHostView(sectionID: subsection.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(subsection.name)
+                                        .font(.headline)
+                                    Spacer()
+                                    Label(subsection.codeWord, systemImage: "link")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text("\(subsection.members.count) crews • \(subsection.groupChats.count) group chats")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text(localized("Show Subsections", language))
+            }
+        } header: {
+            HStack {
+                Text(localized("Subsections", language))
+                Spacer()
+                Button {
+                    newSubsectionName = ""
+                    selectedSubsectionMemberIDs = []
+                    showCreateSubsectionSheet = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .id(WalkthroughTargetID.sectionSubsections.rawValue)
+        .walkthroughTarget(.sectionSubsections)
+    }
+
+    @ViewBuilder
+    private var groupChatsSection: some View {
+        if section.featureSettings.groupChatsEnabled {
+            Section(localized("Group Chats", language)) {
+                if section.groupChats.isEmpty {
+                    Text(localized("No group chats yet. Tap + to create one.", language))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(section.groupChats) { chat in
+                        Button {
+                            onOpenGroupChat(chat.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(chat.name)
+                                    .font(.headline)
+                                Text(latestMessagePreview(for: chat))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .onDelete(perform: deleteGroupChats)
+                }
+            }
+            .id(WalkthroughTargetID.sectionChats.rawValue)
+            .walkthroughTarget(.sectionChats)
+        }
+    }
+
+    @ViewBuilder
+    private var verificationAndTaskSections: some View {
+        if section.featureSettings.sectionTasksEnabled || section.featureSettings.personalTodosEnabled {
+            if !tasksAwaitingVerification.isEmpty || !personalTodosAwaitingVerification.isEmpty {
+                Section(localized("To Verify", language)) {
+                    ForEach(tasksAwaitingVerification) { task in
+                        managerTaskNavigationRow(task)
+                    }
+                    ForEach(personalTodosAwaitingVerification) { item in
+                        managerPersonalTodoVerificationRow(item)
+                    }
+                }
+                .id(WalkthroughTargetID.sectionVerification.rawValue)
+                .walkthroughTarget(.sectionVerification)
+            }
+
+            if section.featureSettings.sectionTasksEnabled {
+                sectionTasksSection
+            }
+        }
+    }
+
+    private var sectionTasksSection: some View {
+        Section {
+            if section.sectionTasks.isEmpty {
+                Text(localized("No section tasks yet.", language))
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker(localized("Task View", language), selection: $sectionTaskViewMode) {
+                    ForEach(TaskTimelineView.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if sectionTaskViewMode == .calendar {
+                    DatePicker(
+                        localized("Calendar", language),
+                        selection: $selectedSectionTaskDate,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    .id(WalkthroughTargetID.sectionTasks.rawValue)
+                    .walkthroughTarget(.sectionTasks)
+
+                    let dailyTasks = sectionTasks(on: selectedSectionTaskDate)
+                    if dailyTasks.isEmpty {
+                        Text(localized("No tasks on this date.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(dailyTasks) { task in
+                            managerTaskNavigationRow(task)
+                        }
+                    }
+                } else {
+                    DatePicker(
+                        localized("Week Of", language),
+                        selection: $selectedSectionTaskWeekAnchor,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.compact)
+
+                    let weeklyBuckets = sectionTasksForSelectedWeek()
+                    if weeklyBuckets.isEmpty {
+                        Text(localized("No tasks in this week.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(weeklyBuckets, id: \.date) { bucket in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(weekHeaderString(for: bucket.date))
+                                    .font(.subheadline.weight(.semibold))
+                                ForEach(bucket.tasks) { task in
                                     managerTaskNavigationRow(task)
                                 }
                             }
-                        } else {
-                            DatePicker(
-                                localized("Week Of", language),
-                                selection: $selectedSectionTaskWeekAnchor,
-                                displayedComponents: .date
-                            )
-                            .datePickerStyle(.compact)
-
-                            let weeklyBuckets = sectionTasksForSelectedWeek()
-                            if weeklyBuckets.isEmpty {
-                                Text(localized("No tasks in this week.", language))
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(weeklyBuckets, id: \.date) { bucket in
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(weekHeaderString(for: bucket.date))
-                                            .font(.subheadline.weight(.semibold))
-                                        ForEach(bucket.tasks) { task in
-                                            managerTaskNavigationRow(task)
-                                        }
-                                    }
-                                    .padding(.vertical, 2)
-                                }
-                            }
-                        }
-                    }
-                    } header: {
-                        HStack {
-                            Text(localized("Section Tasks", language))
-                            Spacer()
-                            Button {
-                                showAssignTaskSheet = true
-                            } label: {
-                                Image(systemName: "plus.circle")
-                            }
-                            .buttonStyle(.plain)
+                            .padding(.vertical, 2)
                         }
                     }
                 }
             }
-
-        }
-        .navigationTitle(section.name)
-        .toolbar {
-            ToolbarItemGroup(placement: .navigationBarTrailing) {
+        } header: {
+            HStack {
+                Text(localized("Section Tasks", language))
+                Spacer()
                 Button {
-                    showSectionSettingsSheet = true
+                    showAssignTaskSheet = true
                 } label: {
-                    Image(systemName: "gearshape")
+                    Image(systemName: "plus.circle")
                 }
-
-                if section.featureSettings.groupChatsEnabled {
-                    Button {
-                        showCreateChatSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
+                .buttonStyle(.plain)
+                .id(WalkthroughTargetID.sectionTaskAddButton.rawValue)
+                .walkthroughTarget(.sectionTaskAddButton)
             }
         }
-        .sheet(isPresented: $showSectionSettingsSheet) {
-            NavigationView {
-                SectionSettingsView(section: $section, onSave: onSave)
-            }
-            .navigationViewStyle(.stack)
-        }
-        .sheet(isPresented: $showCreateSubsectionSheet) {
-            NavigationView {
-                Form {
-                    Section(localized("New Subsection", language)) {
-                        TextField(localized("Subsection name", language), text: $newSubsectionName)
-                            .textInputAutocapitalization(.words)
-                    }
+    }
 
-                    Section(localized("Add Members", language)) {
-                        if section.members.isEmpty {
-                            Text(localized("No members in parent section.", language))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(section.members) { member in
-                                Button {
-                                    toggleSubsectionMember(member.id)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                            Text(member.role.title)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: selectedSubsectionMemberIDs.contains(member.id) ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(selectedSubsectionMemberIDs.contains(member.id) ? .green : .secondary)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    Section {
-                        Button(localized("Create Subsection", language)) {
-                            createSubsection()
-                        }
-                        .disabled(newSubsectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    @ViewBuilder
+    private var walkthroughMemberNavigationLink: some View {
+        NavigationLink(
+            isActive: Binding(
+                get: { walkthroughMemberID != nil },
+                set: { isActive in
+                    if !isActive {
+                        walkthroughMemberID = nil
                     }
                 }
-                .navigationTitle(localized("Create Subsection", language))
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(localized("Cancel", language)) {
-                            showCreateSubsectionSheet = false
-                            newSubsectionName = ""
-                            selectedSubsectionMemberIDs = []
-                        }
-                    }
+            ),
+            destination: {
+                if let walkthroughMemberBinding {
+                    MemberDetailView(
+                        member: walkthroughMemberBinding,
+                        sectionTasks: section.sectionTasks,
+                        onSave: onSave,
+                        walkthroughFocusTarget: walkthroughFocusTarget
+                    )
                 }
-            }
-            .navigationViewStyle(.stack)
-        }
-        .sheet(isPresented: $showCreateChatSheet) {
-            NavigationView {
-                Form {
-                    Section(localized("New Group Chat", language)) {
-                        TextField(localized("Group chat name", language), text: $newChatName)
-                            .textInputAutocapitalization(.words)
-                    }
-
-                    Section(localized("Add Members", language)) {
-                        if section.members.isEmpty {
-                            Text(localized("No section members available yet.", language))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Button(localized("Add All", language)) {
-                                selectAllGroupChatMembers()
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(selectedGroupChatMemberIDs.count == section.members.count)
-
-                            ForEach(section.members) { member in
-                                Button {
-                                    toggleGroupChatMember(member.id)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                            Text(member.role.title)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        if selectedGroupChatMemberIDs.contains(member.id) {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(.green)
-                                        } else {
-                                            Image(systemName: "circle")
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    Section {
-                        Button(localized("Create Group Chat", language)) {
-                            createGroupChat()
-                        }
-                        .disabled(newChatName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-                .navigationTitle(localized("Create Group Chat", language))
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(localized("Cancel", language)) {
-                            showCreateChatSheet = false
-                            newChatName = ""
-                            selectedGroupChatMemberIDs = []
-                        }
-                    }
-                }
-            }
-            .navigationViewStyle(.stack)
-        }
-        .sheet(isPresented: $showAssignTaskSheet) {
-            NavigationView {
-                Form {
-                    Section(localized("Task Details", language)) {
-                        TextField(localized("Task title", language), text: $newSectionTaskTitle)
-                            .textInputAutocapitalization(.sentences)
-
-                        TextEditor(text: $newSectionTaskDescription)
-                            .frame(minHeight: 100)
-                            .overlay(alignment: .topLeading) {
-                                if newSectionTaskDescription.isEmpty {
-                                    Text(localized("Description (use keyboard or dictation)", language))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.top, 8)
-                                        .padding(.leading, 6)
-                                }
-                            }
-
-                        Picker(localized("Priority", language), selection: $newSectionTaskPriority) {
-                            ForEach(TaskPriority.allCases) { priority in
-                                Text(priority.title).tag(priority)
-                            }
-                        }
-
-                        DatePicker(
-                            localized("Due Date", language),
-                            selection: $newSectionTaskDueDate,
-                            displayedComponents: [.date, .hourAndMinute]
-                        )
-
-                        TextField(localized("Site", language), text: $newSectionTaskSiteName)
-                            .textInputAutocapitalization(.words)
-
-                        TextField(localized("Location (optional)", language), text: $newSectionTaskLocation)
-                            .textInputAutocapitalization(.words)
-
-                        Toggle(localized("Requires acknowledgement", language), isOn: $newSectionTaskRequiresAcknowledgement)
-                    }
-
-                    Section(localized("Checklist Items", language)) {
-                        HStack {
-                            TextField(localized("Checklist item", language), text: $newChecklistItemTitle)
-                                .textInputAutocapitalization(.sentences)
-
-                            Button(localized("Add", language)) {
-                                addChecklistItem()
-                            }
-                            .disabled(newChecklistItemTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-
-                        if newSectionTaskChecklistItems.isEmpty {
-                            Text(localized("No checklist items yet.", language))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(newSectionTaskChecklistItems) { item in
-                                HStack {
-                                    Text(item.title)
-                                    Spacer()
-                                    Button(localized("Delete", language), role: .destructive) {
-                                        newSectionTaskChecklistItems.removeAll(where: { $0.id == item.id })
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-
-                    Section(localized("Attachments", language)) {
-                        Button(localized("Add Attachment", language)) {
-                            showTaskAttachmentTypeDialog = true
-                        }
-
-                        if newSectionTaskAttachments.isEmpty {
-                            Text(localized("No attachments yet.", language))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(newSectionTaskAttachments) { attachment in
-                                HStack {
-                                    Label(attachment.label, systemImage: attachment.type.systemImage)
-                                    Spacer()
-                                    Button(localized("Delete", language), role: .destructive) {
-                                        newSectionTaskAttachments.removeAll(where: { $0.id == attachment.id })
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-
-                    Section(localized("Assign To", language)) {
-                        if section.members.isEmpty {
-                            Text(localized("No section members available.", language))
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Button(localized("Add All", language)) {
-                                selectAllAssignees()
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(selectedAssigneeIDs.count == section.members.count)
-
-                            ForEach(section.members) { member in
-                                Button {
-                                    toggleAssignee(member.id)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                            Text(member.role.title)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        if selectedAssigneeIDs.contains(member.id) {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(.green)
-                                        } else {
-                                            Image(systemName: "circle")
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    Section {
-                        Button(localized("Create Task", language)) {
-                            createSectionTask()
-                        }
-                        .disabled(
-                            newSectionTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                            selectedAssigneeIDs.isEmpty
-                        )
-                    }
-                }
-                .navigationTitle(localized("Assign Task", language))
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(localized("Cancel", language)) {
-                            resetTaskComposer()
-                            showAssignTaskSheet = false
-                        }
-                    }
-                }
-            }
-            .navigationViewStyle(.stack)
-        }
-        .sheet(isPresented: $showTaskMediaPicker) {
-            MediaPicker(mediaType: selectedTaskAttachmentType == .video ? .video : .photo) { type, label in
-                let attachmentType: TaskAttachmentType = type == .video ? .video : .photo
-                newSectionTaskAttachments.append(TaskAttachment(type: attachmentType, label: label))
-            }
-        }
-        .fileImporter(isPresented: $showTaskPDFImporter, allowedContentTypes: [.pdf]) { result in
-            guard case .success(let url) = result else { return }
-            newSectionTaskAttachments.append(TaskAttachment(type: .pdf, label: url.lastPathComponent))
-        }
-        .confirmationDialog(localized("Add Attachment", language), isPresented: $showTaskAttachmentTypeDialog) {
-            Button(localized("Photo", language)) {
-                selectedTaskAttachmentType = .photo
-                showTaskMediaPicker = true
-            }
-            Button(localized("Video", language)) {
-                selectedTaskAttachmentType = .video
-                showTaskMediaPicker = true
-            }
-            Button("PDF") {
-                showTaskPDFImporter = true
-            }
-            Button(localized("Cancel", language), role: .cancel) { }
-        }
+            },
+            label: { EmptyView() }
+        )
+        .hidden()
     }
 
     private func createGroupChat() {
@@ -2066,6 +2376,66 @@ struct ManagerSectionDashboardView: View {
         return $section.groupChats[index]
     }
 
+    private var walkthroughMemberBinding: Binding<SectionMember>? {
+        guard let walkthroughMemberID,
+              let index = section.members.firstIndex(where: { $0.id == walkthroughMemberID }) else { return nil }
+        return $section.members[index]
+    }
+
+    private func scrollToWalkthroughTarget(using scrollProxy: ScrollViewProxy) {
+        guard let walkthroughFocusTarget else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                scrollProxy.scrollTo(walkthroughFocusTarget.rawValue, anchor: .center)
+            }
+        }
+    }
+
+    private func applyWalkthroughDestination(_ destination: DemoDestination) {
+        if walkthroughFocusTarget == .sectionSubsections {
+            areSubsectionsExpanded = true
+        }
+
+        switch destination {
+        case .sectionTasks(let sectionID) where sectionID == section.id:
+            areSubsectionsExpanded = false
+            areMembersExpanded = false
+            sectionTaskViewMode = .calendar
+            showSectionSettingsSheet = false
+            walkthroughMemberID = nil
+            showAssignTaskSheet = false
+        case .sectionChats(let sectionID) where sectionID == section.id:
+            areSubsectionsExpanded = false
+            areMembersExpanded = false
+            showAssignTaskSheet = false
+            showSectionSettingsSheet = false
+            walkthroughMemberID = nil
+        case .sectionMembers(let sectionID) where sectionID == section.id:
+            areSubsectionsExpanded = false
+            areMembersExpanded = true
+            showAssignTaskSheet = false
+            showSectionSettingsSheet = false
+            walkthroughMemberID = nil
+        case .sectionTimeClock(let sectionID) where sectionID == section.id:
+            areSubsectionsExpanded = false
+            areMembersExpanded = true
+            showAssignTaskSheet = false
+            showSectionSettingsSheet = false
+            walkthroughMemberID = section.members.first?.id
+        case .sectionSettings(let sectionID) where sectionID == section.id:
+            areSubsectionsExpanded = false
+            showAssignTaskSheet = false
+            walkthroughMemberID = nil
+            showSectionSettingsSheet = true
+        case .sectionDetail(let sectionID) where sectionID == section.id:
+            showAssignTaskSheet = false
+            showSectionSettingsSheet = false
+            walkthroughMemberID = nil
+        default:
+            break
+        }
+    }
+
     private func latestMessagePreview(for chat: SectionGroupChat) -> String {
         guard let lastMessage = chat.messages.last else { return "No messages yet." }
         if lastMessage.messageType == .text {
@@ -2227,6 +2597,7 @@ struct ManagerSectionDashboardView: View {
 struct SectionSettingsView: View {
     @Binding var section: ManagerSection
     let onSave: () -> Void
+    let walkthroughFocusTarget: WalkthroughTargetID?
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
@@ -2256,6 +2627,16 @@ struct SectionSettingsView: View {
         return parentSection.members.filter { parentMember in
             !section.members.contains(where: { $0.phoneNumber == parentMember.phoneNumber })
         }
+    }
+
+    init(
+        section: Binding<ManagerSection>,
+        onSave: @escaping () -> Void,
+        walkthroughFocusTarget: WalkthroughTargetID? = nil
+    ) {
+        _section = section
+        self.onSave = onSave
+        self.walkthroughFocusTarget = walkthroughFocusTarget
     }
 
     var body: some View {
@@ -2387,6 +2768,7 @@ struct SectionSettingsView: View {
                 Toggle(localized("Enable Section Tasks", language), isOn: featureBinding(\.sectionTasksEnabled))
                 Toggle(localized("Enable Personal To-Dos", language), isOn: featureBinding(\.personalTodosEnabled))
             }
+            .walkthroughTarget(walkthroughFocusTarget == .sectionFeatureControls ? .sectionFeatureControls : nil)
         }
         .onAppear {
             sectionNameDraft = section.name
@@ -2505,6 +2887,7 @@ struct ManagerSectionTaskDetailView: View {
     @State private var taskTitleDraft = ""
     @State private var taskDescriptionDraft = ""
     @State private var managerNotesDraft = ""
+    @State private var showTaskPhotoPicker = false
 
     private var assignedMembers: [SectionMember] {
         members.filter { task.assigneeIDs.contains($0.id) }
@@ -2576,9 +2959,19 @@ struct ManagerSectionTaskDetailView: View {
             if !task.attachments.isEmpty {
                 Section(localized("Attachments", language)) {
                     ForEach(task.attachments) { attachment in
-                        Label(attachment.label, systemImage: attachment.type.systemImage)
+                        TaskAttachmentPreviewRow(attachment: attachment)
                     }
                 }
+            }
+
+            Section(localized("Task Photos", language)) {
+                Button(localized("Attach Photo", language)) {
+                    showTaskPhotoPicker = true
+                }
+
+                Text(localized("Attached task photos are visible to all crew members assigned to this task.", language))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section(localized("Crew Lead Notes", language)) {
@@ -2629,6 +3022,12 @@ struct ManagerSectionTaskDetailView: View {
             taskTitleDraft = task.title
             taskDescriptionDraft = task.descriptionText
             managerNotesDraft = task.managerNotes
+        }
+        .sheet(isPresented: $showTaskPhotoPicker) {
+            TaskPhotoPicker { attachment in
+                task.attachments.append(attachment)
+                onSave()
+            }
         }
     }
 }
@@ -3326,6 +3725,7 @@ struct MemberDetailView: View {
     @Binding var member: SectionMember
     let sectionTasks: [SectionTask]
     let onSave: () -> Void
+    let walkthroughFocusTarget: WalkthroughTargetID?
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
     @AppStorage("managerCrewNicknamesJSON") private var managerCrewNicknamesRaw = ""
 
@@ -3349,6 +3749,18 @@ struct MemberDetailView: View {
     @State private var selectedTodoViewDate = Date()
     @State private var selectedTodoWeekAnchor = Date()
     @State private var nicknameDraft = ""
+
+    init(
+        member: Binding<SectionMember>,
+        sectionTasks: [SectionTask],
+        onSave: @escaping () -> Void,
+        walkthroughFocusTarget: WalkthroughTargetID? = nil
+    ) {
+        self._member = member
+        self.sectionTasks = sectionTasks
+        self.onSave = onSave
+        self.walkthroughFocusTarget = walkthroughFocusTarget
+    }
 
     private var language: AppLanguage {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
@@ -3395,10 +3807,10 @@ struct MemberDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                TextField(localized("Nickname", language), text: $nicknameDraft)
+                TextField(localized("Note", language), text: $nicknameDraft)
                     .textInputAutocapitalization(.words)
 
-                Button(localized("Save Nickname", language)) {
+                Button(localized("Save Note", language)) {
                     saveNickname()
                 }
                 .disabled(
@@ -3445,6 +3857,7 @@ struct MemberDetailView: View {
                     }
                 }
             }
+            .walkthroughTarget(walkthroughFocusTarget == .memberTimeClock ? .memberTimeClock : nil)
 
             Section(localized("Scheduled To-Dos", language)) {
                 if scheduledItems.isEmpty {
@@ -3832,4 +4245,24 @@ struct MemberDetailView: View {
         let isCompleted: Bool
         let isAwaitingVerification: Bool
     }
+}
+private struct ManagerViewsPreviewContainer: View {
+    @State private var bluetoothManager = BluetoothManager()
+    private let previewDefaults = UserDefaults(suiteName: "ManagerViewsPreviewDefaults") ?? .standard
+
+    var body: some View {
+        ManagerHomeView(
+            profileName: defaultManagerDemoProfile().name,
+            onSignOut: { }
+        )
+        .environment(bluetoothManager)
+        .defaultAppStorage(previewDefaults)
+        .onAppear {
+            previewDefaults.removePersistentDomain(forName: "ManagerViewsPreviewDefaults")
+        }
+    }
+}
+
+#Preview {
+    ManagerViewsPreviewContainer()
 }

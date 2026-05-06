@@ -524,11 +524,28 @@ struct TaskAttachment: Identifiable, Codable {
     let id: UUID
     var type: TaskAttachmentType
     var label: String
+    var imageDataBase64: String?
 
-    init(id: UUID = UUID(), type: TaskAttachmentType, label: String) {
+    init(id: UUID = UUID(), type: TaskAttachmentType, label: String, imageDataBase64: String? = nil) {
         self.id = id
         self.type = type
         self.label = label
+        self.imageDataBase64 = imageDataBase64
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case label
+        case imageDataBase64
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        type = try container.decode(TaskAttachmentType.self, forKey: .type)
+        label = try container.decode(String.self, forKey: .label)
+        imageDataBase64 = try container.decodeIfPresent(String.self, forKey: .imageDataBase64)
     }
 }
 

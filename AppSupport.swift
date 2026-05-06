@@ -15,6 +15,209 @@ extension Color {
 
 let arcLinkDemoAppStorageSuiteName = "ARCLinkDemoDefaults"
 
+enum WalkthroughTargetID: String, Hashable {
+    case arcVisorButton
+    case airQualityButton
+    case overallTodos
+    case managedSectionCard
+    case managedSectionCode
+    case managedSectionSummary
+    case sectionMembers
+    case sectionSubsections
+    case sectionVerification
+    case sectionTasks
+    case sectionTaskAddButton
+    case sectionFeatureControls
+    case sectionChats
+    case memberTimeClock
+    case arcVisorConnection
+    case airQualityConnection
+    case profileSettings
+    case leadershipSections
+    case profile
+}
+
+enum DemoDestination: Hashable {
+    case home
+    case arcVisor
+    case airQuality
+    case sectionDetail(sectionID: UUID)
+    case sectionTasks(sectionID: UUID)
+    case sectionMembers(sectionID: UUID)
+    case sectionChats(sectionID: UUID)
+    case sectionTimeClock(sectionID: UUID)
+    case sectionSettings(sectionID: UUID)
+    case profile
+}
+
+struct WalkthroughStep: Identifiable {
+    let id: Int
+    let destination: DemoDestination
+    let targetID: WalkthroughTargetID?
+    let title: String
+    let message: String
+}
+
+struct WalkthroughTargetPreferenceKey: PreferenceKey {
+    static var defaultValue: [WalkthroughTargetID: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [WalkthroughTargetID : Anchor<CGRect>], nextValue: () -> [WalkthroughTargetID : Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func walkthroughTarget(_ targetID: WalkthroughTargetID?) -> some View {
+        if let targetID {
+            anchorPreference(key: WalkthroughTargetPreferenceKey.self, value: .bounds) {
+                [targetID: $0]
+            }
+        } else {
+            self
+        }
+    }
+}
+
+struct CoachMarkOverlay: View {
+    let steps: [WalkthroughStep]
+    @Binding var currentStepIndex: Int
+    let targetFrame: CGRect?
+    let onBack: (() -> Void)?
+    let onSkip: () -> Void
+    let onNext: () -> Void
+    let onComplete: () -> Void
+
+    private var currentStep: WalkthroughStep {
+        steps[currentStepIndex]
+    }
+
+    private let tooltipHorizontalPadding: CGFloat = 16
+    private let tooltipVerticalSpacing: CGFloat = 16
+    private let tooltipHeight: CGFloat = 210
+    private let highlightPadding: CGFloat = 8
+
+    var body: some View {
+        GeometryReader { geometryProxy in
+            let highlightFrame = targetFrame?.insetBy(dx: -highlightPadding, dy: -highlightPadding)
+            let layout = tooltipLayout(
+                for: highlightFrame,
+                in: geometryProxy.size,
+                safeAreaInsets: geometryProxy.safeAreaInsets
+            )
+
+            ZStack(alignment: .topLeading) {
+                Color.white.opacity(0.02)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+
+                if let highlightFrame {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.arcAccentOrange.opacity(0.06))
+                        .frame(width: highlightFrame.width, height: highlightFrame.height)
+                        .position(x: highlightFrame.midX, y: highlightFrame.midY)
+                        .allowsHitTesting(false)
+
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.arcAccentOrange, lineWidth: 4)
+                        .frame(width: highlightFrame.width, height: highlightFrame.height)
+                        .position(x: highlightFrame.midX, y: highlightFrame.midY)
+                        .shadow(color: Color.arcAccentOrange.opacity(0.35), radius: 12)
+                        .allowsHitTesting(false)
+                }
+
+                walkthroughCard(width: layout.width)
+                    .position(x: layout.rect.midX, y: layout.rect.midY)
+            }
+        }
+    }
+
+    private func walkthroughCard(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Step \(currentStepIndex + 1) of \(steps.count)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.arcAccentOrange)
+
+            Text(currentStep.title)
+                .font(.headline.weight(.bold))
+
+            Text(currentStep.message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                if let onBack, currentStepIndex > 0 {
+                    Button("Back") {
+                        onBack()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Button("Skip Demo") {
+                    onSkip()
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button(currentStepIndex == steps.count - 1 ? "Done" : "Next") {
+                    if currentStepIndex == steps.count - 1 {
+                        onComplete()
+                    } else {
+                        onNext()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+        .frame(width: width, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.16), radius: 14, y: 8)
+    }
+
+    private func tooltipLayout(
+        for targetFrame: CGRect?,
+        in size: CGSize,
+        safeAreaInsets: EdgeInsets
+    ) -> (rect: CGRect, width: CGFloat) {
+        let width = min(340, size.width - (tooltipHorizontalPadding * 2))
+        let x = (size.width - width) / 2
+        let topY = safeAreaInsets.top + 52
+        let higherTopY = safeAreaInsets.top + 8
+        let bottomY = size.height - safeAreaInsets.bottom - 16 - tooltipHeight
+
+        guard let targetFrame else {
+            return (CGRect(x: x, y: bottomY, width: width, height: tooltipHeight), width)
+        }
+
+        let forceTopSlotTargets: Set<WalkthroughTargetID> = [
+            .overallTodos,
+            .sectionTasks,
+            .memberTimeClock
+        ]
+        let forceBottomSlotTargets: Set<WalkthroughTargetID> = [
+            .airQualityButton,
+            .sectionChats
+        ]
+        let resolvedTargetID = currentStep.targetID ?? .profile
+        let useTopSlot = forceTopSlotTargets.contains(resolvedTargetID) ||
+            (!forceBottomSlotTargets.contains(resolvedTargetID) && targetFrame.midY > (size.height * 0.35))
+        let y: CGFloat
+        if useTopSlot {
+            y = resolvedTargetID == .sectionTasks ? higherTopY : topY
+        } else {
+            y = bottomY
+        }
+        return (CGRect(x: x, y: y, width: width, height: tooltipHeight), width)
+    }
+}
+
 func arcLinkActiveUserDefaults() -> UserDefaults {
     let standardDefaults = UserDefaults.standard
     guard standardDefaults.bool(forKey: "isInDemoMode") else {
@@ -1582,6 +1785,112 @@ struct MediaPicker: UIViewControllerRepresentable {
 
             parent.onPicked(parent.mediaType, label)
             parent.dismiss()
+        }
+    }
+}
+
+struct TaskPhotoPicker: UIViewControllerRepresentable {
+    let onPicked: (TaskAttachment) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .photoLibrary
+        picker.mediaTypes = [UTType.image.identifier]
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: TaskPhotoPicker
+
+        init(parent: TaskPhotoPicker) {
+            self.parent = parent
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]
+        ) {
+            guard let image = (info[.editedImage] ?? info[.originalImage]) as? UIImage,
+                  let jpegData = image.jpegData(compressionQuality: 0.7) else {
+                parent.dismiss()
+                return
+            }
+
+            let attachment = TaskAttachment(
+                type: .photo,
+                label: "Photo \(shortTimeString())",
+                imageDataBase64: jpegData.base64EncodedString()
+            )
+
+            parent.onPicked(attachment)
+            parent.dismiss()
+        }
+    }
+}
+
+struct TaskAttachmentPreviewRow: View {
+    let attachment: TaskAttachment
+
+    @State private var showImagePreview = false
+
+    private var previewImage: UIImage? {
+        guard let imageDataBase64 = attachment.imageDataBase64,
+              let imageData = Data(base64Encoded: imageDataBase64) else {
+            return nil
+        }
+        return UIImage(data: imageData)
+    }
+
+    var body: some View {
+        Group {
+            if attachment.type == .photo, let previewImage {
+                Button {
+                    showImagePreview = true
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Image(uiImage: previewImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        Label(attachment.label, systemImage: attachment.type.systemImage)
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showImagePreview) {
+                    NavigationView {
+                        Color.black
+                            .ignoresSafeArea()
+                            .overlay {
+                                Image(uiImage: previewImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .padding()
+                            }
+                            .navigationTitle(attachment.label)
+                            .navigationBarTitleDisplayMode(.inline)
+                    }
+                    .navigationViewStyle(.stack)
+                }
+            } else {
+                Label(attachment.label, systemImage: attachment.type.systemImage)
+            }
         }
     }
 }

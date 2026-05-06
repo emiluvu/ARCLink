@@ -9,6 +9,7 @@ import SwiftUI
 
 private let demoAppStorageSuiteName = "ARCLinkDemoDefaults"
 private let demoAppStorage = UserDefaults(suiteName: demoAppStorageSuiteName) ?? .standard
+private let sectionLeaderWalkthroughStatusKey = "sectionLeaderDemoWalkthroughStatus"
 
 struct ContentView: View {
     @Environment(BluetoothManager.self) private var bluetoothManager
@@ -321,16 +322,135 @@ private struct DemoModeContainerView: View {
 
     @AppStorage("managerSectionsJSON", store: demoAppStorage) private var managerSectionsRaw = ""
     @AppStorage("profileLanguage", store: demoAppStorage) private var profileLanguageRawValue = AppLanguage.english.rawValue
+    @State private var showManagerWalkthrough = false
+    @State private var walkthroughStepIndex = 0
+    @State private var walkthroughFocusStepIndex = 0
+    @State private var hasHandledInitialWalkthrough = false
+    @State private var isManagerWalkthroughSettling = false
+    @State private var managerWalkthroughDestination: DemoDestination = .home
+    @State private var isDemoControlExpanded = false
 
     private var language: AppLanguage {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
+    }
+
+    private var primaryManagedSectionID: UUID? {
+        mergedSectionsWithDemoSection(from: managerSectionsRaw)
+            .first(where: { $0.ownerAccountID == defaultManagerDemoProfile().accountID && $0.parentSectionID == nil })?
+            .id
+    }
+
+    private var managerWalkthroughSteps: [WalkthroughStep] {
+        let primarySectionDetail = primaryManagedSectionID.map { DemoDestination.sectionDetail(sectionID: $0) } ?? .home
+        let primarySectionTasks = primaryManagedSectionID.map { DemoDestination.sectionTasks(sectionID: $0) } ?? .home
+        let primarySectionChats = primaryManagedSectionID.map { DemoDestination.sectionChats(sectionID: $0) } ?? .home
+        let primarySectionTimeClock = primaryManagedSectionID.map { DemoDestination.sectionTimeClock(sectionID: $0) } ?? .home
+
+        return [
+            WalkthroughStep(
+                id: 0,
+                destination: .home,
+                targetID: .arcVisorButton,
+                title: localized("Open ARCVisor", language),
+                message: localized("Use the ARCVisor row on the main dashboard to open the connected visor workspace and monitor live visor activity.", language)
+            ),
+            WalkthroughStep(
+                id: 1,
+                destination: .home,
+                targetID: .airQualityButton,
+                title: localized("Air Quality Data", language),
+                message: localized("The Air Quality Data row opens live environmental readings and safety alerts directly from the Crew Lead dashboard.", language)
+            ),
+            WalkthroughStep(
+                id: 2,
+                destination: .home,
+                targetID: .overallTodos,
+                title: localized("Overall To-Do List", language),
+                message: localized("This dashboard list helps Crew Leads review leadership tasks, verification items, and priority work without leaving the home screen.", language)
+            ),
+            WalkthroughStep(
+                id: 3,
+                destination: .home,
+                targetID: .managedSectionCard,
+                title: localized("Section Management", language),
+                message: localized("Managed Sections is the main Crew Lead control area for opening sections, reviewing status, and organizing work by crew or site.", language)
+            ),
+            WalkthroughStep(
+                id: 4,
+                destination: .home,
+                targetID: .profile,
+                title: localized("Profile and Settings", language),
+                message: localized("The profile row gives Crew Leads access to account details, password changes, language settings, and shortcuts-related options.", language)
+            ),
+            WalkthroughStep(
+                id: 5,
+                destination: primarySectionDetail,
+                targetID: .sectionFeatureControls,
+                title: localized("Section Feature Controls", language),
+                message: localized("The section controls let Crew Leads manage which tools are active, including time clock, group chats, section tasks, and personal to-dos.", language)
+            ),
+            WalkthroughStep(
+                id: 6,
+                destination: primarySectionDetail,
+                targetID: .sectionMembers,
+                title: localized("Member Management", language),
+                message: localized("Inside the section, Crew Leads can open the member area to review assigned people, roles, and field status.", language)
+            ),
+            WalkthroughStep(
+                id: 7,
+                destination: primarySectionDetail,
+                targetID: .sectionSubsections,
+                title: localized("Subsection Management", language),
+                message: localized("Open the subsection area inside the section to organize smaller crews, zones, or phases under the main section.", language)
+            ),
+            WalkthroughStep(
+                id: 8,
+                destination: primarySectionChats,
+                targetID: .sectionChats,
+                title: localized("Group Chats and Pinned Messages", language),
+                message: localized("Section chats keep crews aligned with pinned updates, media sharing, reactions, and message visibility controls.", language)
+            ),
+            WalkthroughStep(
+                id: 9,
+                destination: primarySectionDetail,
+                targetID: .sectionVerification,
+                title: localized("Task Review and Verification", language),
+                message: localized("The section task area shows completion progress and verification status so leads can follow work from assigned to confirmed.", language)
+            ),
+            WalkthroughStep(
+                id: 10,
+                destination: primarySectionTasks,
+                targetID: .sectionTaskAddButton,
+                title: localized("Section Task Creation", language),
+                message: localized("Crew Leads create section tasks here with assignees, due dates, priorities, checklists, and attachments.", language)
+            ),
+            WalkthroughStep(
+                id: 11,
+                destination: primarySectionTasks,
+                targetID: .sectionTasks,
+                title: localized("Progress Oversight", language),
+                message: localized("Task summaries inside the section make it easy to track progress, spot stalled work, and review what still needs attention.", language)
+            ),
+            WalkthroughStep(
+                id: 12,
+                destination: primarySectionTimeClock,
+                targetID: .memberTimeClock,
+                title: localized("Time Clock Visibility", language),
+                message: localized("Member detail time clock data gives Crew Leads visibility into attendance, time entries, and on-site status.", language)
+            )
+        ]
     }
 
     var body: some View {
         Group {
             switch activeRole {
             case .manager:
-                ManagerHomeView(profileName: defaultManagerDemoProfile().name, onSignOut: onExitDemo)
+                ManagerHomeView(
+                    profileName: defaultManagerDemoProfile().name,
+                    walkthroughDestination: showManagerWalkthrough ? managerWalkthroughDestination : .home,
+                    walkthroughFocusTarget: showManagerWalkthrough ? managerWalkthroughSteps[walkthroughFocusStepIndex].targetID : nil,
+                    onSignOut: onExitDemo
+                )
             case .worker:
                 WorkerHomeView(
                     profileName: defaultWorkerDemoProfile().name,
@@ -342,14 +462,44 @@ private struct DemoModeContainerView: View {
             }
         }
         .defaultAppStorage(demoAppStorage)
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 0) {
-                demoControlBar
-                Color.clear.frame(height: 18)
+        .overlayPreferenceValue(WalkthroughTargetPreferenceKey.self) { preferences in
+            GeometryReader { geometryProxy in
+                if activeRole == .manager, showManagerWalkthrough, !isManagerWalkthroughSettling {
+                    CoachMarkOverlay(
+                        steps: managerWalkthroughSteps,
+                        currentStepIndex: $walkthroughStepIndex,
+                        targetFrame: currentManagerWalkthroughTargetFrame(
+                            preferences: preferences,
+                            geometryProxy: geometryProxy
+                        ),
+                        onBack: {
+                            transitionManagerWalkthrough(to: max(0, walkthroughStepIndex - 1))
+                        },
+                        onSkip: {
+                            finishManagerWalkthrough(status: "skipped")
+                        },
+                        onNext: {
+                            transitionManagerWalkthrough(to: walkthroughStepIndex + 1)
+                        },
+                        onComplete: {
+                            finishManagerWalkthrough(status: "completed")
+                        }
+                    )
+                }
             }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            demoControlBar
+                .padding(.trailing, 12)
+                .padding(.bottom, 12)
         }
         .onAppear {
             managerSectionsRaw = encodeSections(mergedSectionsWithDemoSection(from: managerSectionsRaw))
+            guard !hasHandledInitialWalkthrough else { return }
+            hasHandledInitialWalkthrough = true
+            if activeRole == .manager {
+                startManagerWalkthrough()
+            }
         }
     }
 
@@ -363,37 +513,105 @@ private struct DemoModeContainerView: View {
     }
 
     private var demoControlBar: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Text(localized("Demo Mode", language))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button(localized("Exit Demo", language)) {
-                    onExitDemo()
+        VStack(spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isDemoControlExpanded.toggle()
                 }
-                .font(.caption.weight(.semibold))
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isDemoControlExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.bold))
+                    Text("Demo")
+                        .font(.caption.weight(.semibold))
+                    if isDemoControlExpanded {
+                        Text(activeRole == .manager ? localized("Crew Lead", language) : localized("Crew", language))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, isDemoControlExpanded ? 10 : 12)
+                .padding(.vertical, 7)
             }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+#if os(iOS)
+            .onHover { isHovering in
+                guard isHovering, !isDemoControlExpanded else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isDemoControlExpanded = true
+                }
+            }
+#endif
 
-            Picker(
-                localized("View As", language),
-                selection: Binding(
-                    get: { activeRole },
-                    set: { onSelectRole($0) }
-                )
-            ) {
-                Text(localized("Crew Lead", language)).tag(AppRole.manager)
-                Text(localized("Crew", language)).tag(AppRole.worker)
+            if isDemoControlExpanded {
+                HStack {
+                    Spacer()
+                    Button(localized("Exit Demo", language)) {
+                        onExitDemo()
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+
+                Picker(
+                    localized("View As", language),
+                    selection: Binding(
+                        get: { activeRole },
+                        set: { onSelectRole($0) }
+                    )
+                ) {
+                    Text(localized("Crew Lead", language)).tag(AppRole.manager)
+                    Text(localized("Crew", language)).tag(AppRole.worker)
+                }
+                .pickerStyle(.segmented)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .pickerStyle(.segmented)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
-        .padding(.horizontal, 72)
-        .padding(.top, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, isDemoControlExpanded ? 10 : 6)
+        .frame(width: isDemoControlExpanded ? 210 : nil, alignment: .trailing)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 10, y: 4)
+    }
+
+    private func startManagerWalkthrough() {
+        showManagerWalkthrough = true
+        UserDefaults.standard.removeObject(forKey: sectionLeaderWalkthroughStatusKey)
+        transitionManagerWalkthrough(to: 0)
+    }
+
+    private func finishManagerWalkthrough(status: String) {
+        UserDefaults.standard.set(status, forKey: sectionLeaderWalkthroughStatusKey)
+        isManagerWalkthroughSettling = false
+        showManagerWalkthrough = false
+    }
+
+    private func transitionManagerWalkthrough(to index: Int) {
+        guard managerWalkthroughSteps.indices.contains(index) else { return }
+        let step = managerWalkthroughSteps[index]
+        isManagerWalkthroughSettling = true
+        managerWalkthroughDestination = step.destination
+        walkthroughFocusStepIndex = index
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            walkthroughStepIndex = index
+            isManagerWalkthroughSettling = false
+        }
+    }
+
+    private func currentManagerWalkthroughTargetFrame(
+        preferences: [WalkthroughTargetID: Anchor<CGRect>],
+        geometryProxy: GeometryProxy
+    ) -> CGRect? {
+        guard managerWalkthroughSteps.indices.contains(walkthroughStepIndex),
+              let targetID = managerWalkthroughSteps[walkthroughStepIndex].targetID,
+              let anchor = preferences[targetID] else {
+            return nil
+        }
+        return geometryProxy[anchor]
     }
 }
 
