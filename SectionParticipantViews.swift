@@ -63,9 +63,29 @@ struct ManagerAssignedSectionDashboardView: View {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
     }
 
+    private var latestSectionAlert: SectionAlert? {
+        currentSection?.alerts.sorted { $0.createdAt > $1.createdAt }.first
+    }
+
     var body: some View {
         List {
             if let section = currentSection {
+                if let latestSectionAlert {
+                    Section(localized("Alert", language)) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(latestSectionAlert.title, systemImage: "exclamationmark.triangle.fill")
+                                .font(.headline)
+                                .foregroundStyle(.red)
+                            Text(latestSectionAlert.message)
+                                .font(.body)
+                            Text(latestSectionAlert.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(section.name)

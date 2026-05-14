@@ -109,6 +109,7 @@ struct ManagerSection: Identifiable, Codable {
     var members: [SectionMember]
     var groupChats: [SectionGroupChat]
     var sectionTasks: [SectionTask]
+    var alerts: [SectionAlert]
 
     init(
         id: UUID = UUID(),
@@ -119,7 +120,8 @@ struct ManagerSection: Identifiable, Codable {
         featureSettings: SectionFeatureSettings = SectionFeatureSettings(),
         members: [SectionMember] = [],
         groupChats: [SectionGroupChat] = [],
-        sectionTasks: [SectionTask] = []
+        sectionTasks: [SectionTask] = [],
+        alerts: [SectionAlert] = []
     ) {
         self.id = id
         self.ownerAccountID = ownerAccountID
@@ -130,6 +132,7 @@ struct ManagerSection: Identifiable, Codable {
         self.members = members
         self.groupChats = groupChats
         self.sectionTasks = sectionTasks
+        self.alerts = alerts
     }
 
     enum CodingKeys: String, CodingKey {
@@ -142,6 +145,7 @@ struct ManagerSection: Identifiable, Codable {
         case members
         case groupChats
         case sectionTasks
+        case alerts
     }
 
     init(from decoder: Decoder) throws {
@@ -155,6 +159,21 @@ struct ManagerSection: Identifiable, Codable {
         members = try container.decodeIfPresent([SectionMember].self, forKey: .members) ?? []
         groupChats = try container.decodeIfPresent([SectionGroupChat].self, forKey: .groupChats) ?? []
         sectionTasks = try container.decodeIfPresent([SectionTask].self, forKey: .sectionTasks) ?? []
+        alerts = try container.decodeIfPresent([SectionAlert].self, forKey: .alerts) ?? []
+    }
+}
+
+struct SectionAlert: Identifiable, Codable {
+    let id: UUID
+    var title: String
+    var message: String
+    var createdAt: Date
+
+    init(id: UUID = UUID(), title: String, message: String, createdAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.message = message
+        self.createdAt = createdAt
     }
 }
 

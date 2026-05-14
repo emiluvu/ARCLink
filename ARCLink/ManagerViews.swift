@@ -40,6 +40,14 @@ struct ManagerLeadershipTodoItem: Identifiable {
 }
 
 struct ManagerHomeView: View {
+    private struct SnapshotMetric: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: String
+        let systemImage: String
+        let tint: Color
+    }
+
     let profileName: String
     let onSignOut: () -> Void
 
@@ -123,10 +131,100 @@ struct ManagerHomeView: View {
         }
     }
 
+    private var primaryOverviewSection: ManagerSection? {
+        managerSections.first ?? leadershipSections.first
+    }
+
+    private var overviewMetrics: [SnapshotMetric] {
+        guard let section = primaryOverviewSection else { return [] }
+        return [
+            SnapshotMetric(title: localized("Members", language), value: "\(section.members.count)", systemImage: "person.3.fill", tint: .blue),
+            SnapshotMetric(title: localized("On Site", language), value: "\(section.members.filter(\.isOnSite).count)", systemImage: "checkmark.seal.fill", tint: .green),
+            SnapshotMetric(title: localized("Due Today", language), value: "\(dueTodayCount(in: section))", systemImage: "calendar", tint: .orange),
+            SnapshotMetric(title: localized("To Verify", language), value: "\(awaitingVerificationCount(in: section))", systemImage: "clock.badge.checkmark.fill", tint: .red)
+        ]
+    }
+
     private func subsections(for parentID: UUID) -> [ManagerSection] {
         allSections
             .filter { $0.parentSectionID == parentID && isOwnedSection($0) }
             .sorted { $0.name < $1.name }
+    }
+
+    private func dueTodayCount(in section: ManagerSection) -> Int {
+        let calendar = Calendar.current
+        let sectionTasks = section.sectionTasks.filter { calendar.isDateInToday($0.dueDate) }.count
+        let todos = section.members.flatMap(\.todos).filter { calendar.isDateInToday($0.dueDate) }.count
+        return sectionTasks + todos
+    }
+
+    private func awaitingVerificationCount(in section: ManagerSection) -> Int {
+        let tasks = section.sectionTasks.filter { task in
+            task.requiresAcknowledgement && task.doneMemberIDs.contains(where: { !task.verifiedMemberIDs.contains($0) })
+        }.count
+        let todos = section.members.flatMap(\.todos).filter {
+            $0.requiresAcknowledgement && $0.isMarkedDone && !$0.isCompleted
+        }.count
+        return tasks + todos
+    }
+
+    private func assignedTaskCount(for member: SectionMember, in section: ManagerSection) -> Int {
+        section.sectionTasks.filter { $0.assigneeIDs.contains(member.id) }.count
+    }
+
+    private func completedTaskCount(for member: SectionMember, in section: ManagerSection) -> Int {
+        section.sectionTasks.filter {
+            $0.requiresAcknowledgement ? $0.verifiedMemberIDs.contains(member.id) : $0.doneMemberIDs.contains(member.id)
+        }.count
+    }
+
+    private func completedTodoCount(for member: SectionMember) -> Int {
+        member.todos.filter { $0.requiresAcknowledgement ? $0.isCompleted : $0.isMarkedDone }.count
+    }
+
+    private func memberStatusLabel(_ member: SectionMember, in section: ManagerSection) -> String {
+        let hasAwaitingTaskVerification = section.sectionTasks.contains { task in
+            task.requiresAcknowledgement &&
+            task.assigneeIDs.contains(member.id) &&
+            task.doneMemberIDs.contains(member.id) &&
+            !task.verifiedMemberIDs.contains(member.id)
+        }
+        let hasAwaitingTodoVerification = member.todos.contains {
+            $0.requiresAcknowledgement && $0.isMarkedDone && !$0.isCompleted
+        }
+
+        if hasAwaitingTaskVerification || hasAwaitingTodoVerification {
+            return localized("Awaiting Verify", language)
+        }
+        return member.isOnSite ? localized("On Site", language) : localized("Off Site", language)
+    }
+
+    private func memberStatusColor(_ member: SectionMember, in section: ManagerSection) -> Color {
+        memberStatusLabel(member, in: section) == localized("Awaiting Verify", language)
+            ? .orange
+            : (member.isOnSite ? .green : .secondary)
+    }
+
+    private func summaryHeatmapCell(completed: Int, total: Int) -> some View {
+        let ratio = total == 0 ? 0 : Double(completed) / Double(total)
+        let color: Color
+        switch ratio {
+        case ..<0.34:
+            color = .red
+        case ..<0.67:
+            color = .orange
+        default:
+            color = .green
+        }
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill((total == 0 ? Color.secondary : color).opacity(total == 0 ? 0.14 : 0.22))
+                .frame(width: 40, height: 30)
+            Text(total == 0 ? "0" : "\(completed)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(total == 0 ? .secondary : color)
+        }
     }
 
     private func leadershipTodoItems(for section: ManagerSection) -> [ManagerLeadershipTodoItem] {
@@ -208,6 +306,81 @@ struct ManagerHomeView: View {
                         Label(localized("Open ARCVisor", language), systemImage: "visionpro")
                     }
                     .buttonStyle(.plain)
+                }
+
+                if let section = primaryOverviewSection {
+                    Section(localized("Crew Snapshot", language)) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack {
+                                Text(section.name)
+                                    .font(.headline)
+                                Spacer()
+                                Text(section.codeWord)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                ForEach(overviewMetrics) { metric in
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Label(metric.title, systemImage: metric.systemImage)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(metric.tint)
+                                        Text(metric.value)
+                                            .font(.title3.weight(.bold))
+                                        Rectangle()
+                                            .fill(metric.tint.opacity(0.18))
+                                            .frame(height: 5)
+                                            .clipShape(Capsule())
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(localized("Member Status Board", language))
+                                    .font(.subheadline.weight(.semibold))
+
+                                ForEach(section.members.prefix(4)) { member in
+                                    HStack(spacing: 10) {
+                                        Circle()
+                                            .fill(memberStatusColor(member, in: section))
+                                            .frame(width: 10, height: 10)
+                                        Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text(memberStatusLabel(member, in: section))
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(memberStatusColor(member, in: section).opacity(0.15), in: Capsule())
+                                            .foregroundStyle(memberStatusColor(member, in: section))
+                                    }
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(localized("Task Completion Heatmap", language))
+                                    .font(.subheadline.weight(.semibold))
+
+                                ForEach(section.members.prefix(4)) { member in
+                                    HStack {
+                                        Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Spacer(minLength: 12)
+                                        summaryHeatmapCell(completed: completedTaskCount(for: member, in: section), total: assignedTaskCount(for: member, in: section))
+                                        summaryHeatmapCell(completed: completedTodoCount(for: member), total: member.todos.count)
+                                        summaryHeatmapCell(completed: completedTaskCount(for: member, in: section) + completedTodoCount(for: member), total: assignedTaskCount(for: member, in: section) + member.todos.count)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
 
                 Section {
@@ -1136,6 +1309,14 @@ struct ManagerSectionDashboardView: View {
         var id: String { "\(memberID.uuidString)-\(todoID.uuidString)" }
     }
 
+    private struct SnapshotMetric: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: String
+        let systemImage: String
+        let tint: Color
+    }
+
     @Binding var section: ManagerSection
     let onSave: () -> Void
 
@@ -1184,6 +1365,12 @@ struct ManagerSectionDashboardView: View {
 
     var body: some View {
         List {
+            Section(localized("Section Snapshot", language)) {
+                sectionSnapshotCard
+                memberStatusBoard
+                taskCompletionHeatmap
+            }
+
             Section(localized("Members", language)) {
                 DisclosureGroup(isExpanded: $areMembersExpanded) {
                     if section.members.isEmpty {
@@ -1711,6 +1898,122 @@ struct ManagerSectionDashboardView: View {
         }
     }
 
+    private var sectionSnapshotCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(localized("Live overview", language))
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(snapshotMetrics) { metric in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(metric.title, systemImage: metric.systemImage)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(metric.tint)
+                        Text(metric.value)
+                            .font(.title3.weight(.bold))
+                        Rectangle()
+                            .fill(metric.tint.opacity(0.18))
+                            .frame(height: 5)
+                            .clipShape(Capsule())
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var memberStatusBoard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(localized("Member Status Board", language))
+                .font(.headline)
+
+            if section.members.isEmpty {
+                Text(localized("No crews have joined this section yet.", language))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(section.members) { member in
+                    HStack(alignment: .center, spacing: 12) {
+                        Circle()
+                            .fill(statusColor(for: member))
+                            .frame(width: 10, height: 10)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(member.role.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(spacing: 8) {
+                                statusPill(title: memberStatusLabel(for: member), tint: statusColor(for: member))
+                                Text("\(memberCompletedAssignments(member))/\(memberAssignedAssignments(member)) \(localized("done", language).lowercased())")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var taskCompletionHeatmap: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(localized("Task Completion Heatmap", language))
+                .font(.headline)
+
+            if section.members.isEmpty {
+                Text(localized("No crews have joined this section yet.", language))
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Text(localized("Member", language))
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    ForEach(heatmapColumns, id: \.self) { column in
+                        Text(column)
+                            .font(.caption2.weight(.semibold))
+                            .frame(width: 44)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ForEach(section.members) { member in
+                    HStack {
+                        Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+
+                        Spacer(minLength: 12)
+
+                        heatmapCell(
+                            completed: completedSectionTaskCount(for: member.id),
+                            total: assignedSectionTaskCount(for: member.id)
+                        )
+                        heatmapCell(
+                            completed: completedPersonalTodoCount(for: member),
+                            total: member.todos.count
+                        )
+                        heatmapCell(
+                            completed: memberCompletedAssignments(member),
+                            total: memberAssignedAssignments(member)
+                        )
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     private func createGroupChat() {
         let cleanedName = newChatName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanedName.isEmpty else { return }
@@ -1840,6 +2143,143 @@ struct ManagerSectionDashboardView: View {
 
     private func completedSectionTaskCount(for memberID: UUID) -> Int {
         section.sectionTasks.filter { finalCompletionMemberIDs(for: $0).contains(memberID) }.count
+    }
+
+    private func completedPersonalTodoCount(for member: SectionMember) -> Int {
+        member.todos.filter { personalTodoIsCompleted($0) }.count
+    }
+
+    private func memberAssignedAssignments(_ member: SectionMember) -> Int {
+        assignedSectionTaskCount(for: member.id) + member.todos.count
+    }
+
+    private func memberCompletedAssignments(_ member: SectionMember) -> Int {
+        completedSectionTaskCount(for: member.id) + completedPersonalTodoCount(for: member)
+    }
+
+    private func personalTodoIsCompleted(_ todo: MemberTodo) -> Bool {
+        todo.requiresAcknowledgement ? todo.isCompleted : todo.isMarkedDone
+    }
+
+    private var snapshotMetrics: [SnapshotMetric] {
+        [
+            SnapshotMetric(
+                title: localized("Members", language),
+                value: "\(section.members.count)",
+                systemImage: "person.3.fill",
+                tint: .blue
+            ),
+            SnapshotMetric(
+                title: localized("On Site", language),
+                value: "\(section.members.filter(\.isOnSite).count)",
+                systemImage: "checkmark.seal.fill",
+                tint: .green
+            ),
+            SnapshotMetric(
+                title: localized("Due Today", language),
+                value: "\(tasksDueTodayCount)",
+                systemImage: "calendar",
+                tint: .orange
+            ),
+            SnapshotMetric(
+                title: localized("To Verify", language),
+                value: "\(tasksAwaitingVerification.count + personalTodosAwaitingVerification.count)",
+                systemImage: "clock.badge.checkmark.fill",
+                tint: .red
+            )
+        ]
+    }
+
+    private var tasksDueTodayCount: Int {
+        let calendar = Calendar.current
+        let sectionTasksDueToday = section.sectionTasks.filter { calendar.isDateInToday($0.dueDate) }.count
+        let personalTodosDueToday = section.members.flatMap(\.todos).filter { calendar.isDateInToday($0.dueDate) }.count
+        return sectionTasksDueToday + personalTodosDueToday
+    }
+
+    private var heatmapColumns: [String] {
+        [
+            localized("Tasks", language),
+            localized("To-Dos", language),
+            localized("Total", language)
+        ]
+    }
+
+    private func memberStatusLabel(for member: SectionMember) -> String {
+        let assignedTasks = assignedSectionTaskCount(for: member.id)
+        let completedTasks = completedSectionTaskCount(for: member.id)
+        let completedTodos = completedPersonalTodoCount(for: member)
+        let hasAwaitingTaskVerification = section.sectionTasks.contains { task in
+            task.requiresAcknowledgement &&
+            task.assigneeIDs.contains(member.id) &&
+            task.doneMemberIDs.contains(member.id) &&
+            !task.verifiedMemberIDs.contains(member.id)
+        }
+        let hasAwaitingPersonalVerification = member.todos.contains {
+            $0.requiresAcknowledgement && $0.isMarkedDone && !$0.isCompleted
+        }
+
+        if hasAwaitingTaskVerification || hasAwaitingPersonalVerification {
+            return localized("Awaiting Verify", language)
+        }
+        if member.isOnSite {
+            if assignedTasks > 0 &&
+                completedTasks == assignedTasks &&
+                completedTodos == member.todos.count {
+                return localized("On Site", language) + " • " + localized("Clear", language)
+            }
+            return localized("On Site", language)
+        }
+        return localized("Off Site", language)
+    }
+
+    private func statusColor(for member: SectionMember) -> Color {
+        memberStatusLabel(for: member) == localized("Awaiting Verify", language)
+            ? .orange
+            : (member.isOnSite ? .green : .secondary)
+    }
+
+    private func statusPill(title: String, tint: Color) -> some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.15), in: Capsule())
+            .foregroundStyle(tint)
+    }
+
+    private func heatmapCell(completed: Int, total: Int) -> some View {
+        let ratio = total == 0 ? 0 : Double(completed) / Double(total)
+        let fillColor: Color = total == 0 ? .secondary.opacity(0.14) : completionColor(for: ratio).opacity(0.22)
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(fillColor)
+                .frame(width: 44, height: 34)
+            Text(total == 0 ? "0" : "\(completed)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(total == 0 ? .secondary : completionColor(for: ratio))
+        }
+        .overlay(alignment: .bottom) {
+            if total > 0 {
+                Capsule()
+                    .fill(completionColor(for: ratio))
+                    .frame(width: 30 * ratio, height: 4)
+                    .offset(y: -4)
+            }
+        }
+        .accessibilityLabel("\(completed) of \(total)")
+    }
+
+    private func completionColor(for ratio: Double) -> Color {
+        switch ratio {
+        case ..<0.34:
+            return .red
+        case ..<0.67:
+            return .orange
+        default:
+            return .green
+        }
     }
 
     private func resetTaskComposer() {

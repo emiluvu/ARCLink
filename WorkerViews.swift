@@ -25,6 +25,14 @@ struct WorkerPersonalTodoItem: Identifiable {
 }
 
 struct WorkerHomeView: View {
+    private struct SnapshotMetric: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: String
+        let systemImage: String
+        let tint: Color
+    }
+
     let profileName: String
     let profilePhoneNumber: String
     let sectionName: String
@@ -35,6 +43,7 @@ struct WorkerHomeView: View {
     @AppStorage("workerPrivateTaskNotesJSON") private var workerPrivateTaskNotesRaw = ""
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
     @State private var showARCVisor = false
+    @State private var emergencyStatusMessage = ""
 
     private let updates: [CrewMessage] = [
         CrewMessage(sender: "Foreman", text: "Meet at Gate C for safety brief.", time: "6:45 AM"),
@@ -126,6 +135,55 @@ struct WorkerHomeView: View {
         )
     }
 
+    private var latestSectionAlert: SectionAlert? {
+        relatedSections
+            .flatMap(\.alerts)
+            .sorted { $0.createdAt > $1.createdAt }
+            .first
+    }
+
+    private var workerSnapshotMetrics: [SnapshotMetric] {
+        [
+            SnapshotMetric(
+                title: localized("Tasks Due Today", language),
+                value: "\(assignedSectionTasks.filter { Calendar.current.isDateInToday($0.task.dueDate) }.count)",
+                systemImage: "calendar",
+                tint: .orange
+            ),
+            SnapshotMetric(
+                title: localized("To-Dos Left", language),
+                value: "\(personalTodos.filter { !isPersonalTodoCompleted($0.todo) }.count)",
+                systemImage: "checklist",
+                tint: .blue
+            ),
+            SnapshotMetric(
+                title: localized("Waiting Verify", language),
+                value: "\(assignedSectionTasks.filter { isTaskMarkedDone($0) && !isTaskCompleted($0) }.count + personalTodos.filter { $0.todo.requiresAcknowledgement && $0.todo.isMarkedDone && !$0.todo.isCompleted }.count)",
+                systemImage: "clock.badge.checkmark.fill",
+                tint: .orange
+            ),
+            SnapshotMetric(
+                title: localized("Status", language),
+                value: isClockedInNow ? localized("On Site", language) : localized("Off Site", language),
+                systemImage: isClockedInNow ? "checkmark.seal.fill" : "xmark.seal",
+                tint: isClockedInNow ? .green : .secondary
+            )
+        ]
+    }
+
+    private var totalAssignedWorkCount: Int {
+        assignedSectionTasks.count + personalTodos.count
+    }
+
+    private var totalCompletedWorkCount: Int {
+        assignedSectionTasks.filter { isTaskCompleted($0) }.count + personalTodos.filter { isPersonalTodoCompleted($0.todo) }.count
+    }
+
+    private var totalPendingVerificationCount: Int {
+        assignedSectionTasks.filter { isTaskMarkedDone($0) && !isTaskCompleted($0) }.count +
+        personalTodos.filter { $0.todo.requiresAcknowledgement && $0.todo.isMarkedDone && !$0.todo.isCompleted }.count
+    }
+
     var body: some View {
         NavigationView {
             List {
@@ -154,6 +212,25 @@ struct WorkerHomeView: View {
                         Label(localized("Air Quality Data", language), systemImage: "aqi.medium")
                     }
                 }
+
+                if let latestSectionAlert {
+                    Section(localized("Alert", language)) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(latestSectionAlert.title, systemImage: "exclamationmark.triangle.fill")
+                                .font(.headline)
+                                .foregroundStyle(.red)
+                            Text(latestSectionAlert.message)
+                                .font(.body)
+                            Text(latestSectionAlert.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
+                workerEmergencySection
+                workerSnapshotSection
 
                 if currentSection?.featureSettings.timeClockEnabled ?? true {
                     Section(localized("Time Clock", language)) {
@@ -406,6 +483,141 @@ struct WorkerHomeView: View {
         .onAppear {
             managerSectionsRaw = encodeSections(mergedSectionsWithDemoSection(from: managerSectionsRaw))
         }
+    }
+
+    private var workerSnapshotSection: some View {
+        Section(localized("Today Snapshot", language)) {
+            VStack(alignment: .leading, spacing: 14) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(workerSnapshotMetrics) { metric in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(metric.title, systemImage: metric.systemImage)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(metric.tint)
+                            Text(metric.value)
+                                .font(.title3.weight(.bold))
+                            Rectangle()
+                                .fill(metric.tint.opacity(0.18))
+                                .frame(height: 5)
+                                .clipShape(Capsule())
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(localized("Progress Card", language))
+                        .font(.headline)
+
+                    HStack {
+                        Text("\(totalCompletedWorkCount)/\(max(totalAssignedWorkCount, 0))")
+                            .font(.title2.weight(.bold))
+                        Text(localized("completed", language).lowercased())
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if totalPendingVerificationCount > 0 {
+                            Text("\(totalPendingVerificationCount) \(localized("awaiting verify", language).lowercased())")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    workerProgressBar(
+                        completed: totalCompletedWorkCount,
+                        pendingVerification: totalPendingVerificationCount,
+                        total: totalAssignedWorkCount
+                    )
+
+                    HStack {
+                        Text("\(localized("Tasks", language)): \(assignedSectionTasks.filter { isTaskCompleted($0) }.count)/\(assignedSectionTasks.count)")
+                        Spacer()
+                        Text("\(localized("To-Dos", language)): \(personalTodos.filter { isPersonalTodoCompleted($0.todo) }.count)/\(personalTodos.count)")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var workerEmergencySection: some View {
+        Section(localized("Emergency", language)) {
+            Button {
+                sendEmergencyEvacuate()
+            } label: {
+                Label("Emergency Evacuate", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .disabled(!bluetoothManager.isConnected())
+
+            if !emergencyStatusMessage.isEmpty {
+                Text(emergencyStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func sendEmergencyEvacuate() {
+        guard bluetoothManager.isConnected() else {
+            emergencyStatusMessage = "Bluetooth not connected."
+            return
+        }
+
+        do {
+            try bluetoothManager.writeString("{\"message\":\"emergancy evacuate\"}")
+            appendEmergencyAlertToRelatedSections()
+            emergencyStatusMessage = "Emergency evacuate sent."
+        } catch {
+            emergencyStatusMessage = "Failed to send emergency evacuate."
+        }
+    }
+
+    private func appendEmergencyAlertToRelatedSections() {
+        let relatedSectionIDs = Set(relatedSections.map(\.id))
+        var sections = decodeSections(from: managerSectionsRaw)
+        for index in sections.indices where relatedSectionIDs.contains(sections[index].id) {
+            sections[index].alerts.insert(
+                SectionAlert(
+                    title: "Emergency Evacuate",
+                    message: "Emergency evacuate. Leave the area and follow site evacuation procedures."
+                ),
+                at: 0
+            )
+        }
+        managerSectionsRaw = encodeSections(sections)
+    }
+
+    private func workerProgressBar(completed: Int, pendingVerification: Int, total: Int) -> some View {
+        let remaining = max(total - completed - pendingVerification, 0)
+        let safeTotal = max(total, 1)
+
+        return GeometryReader { proxy in
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.green)
+                    .frame(width: proxy.size.width * CGFloat(completed) / CGFloat(safeTotal))
+                Rectangle()
+                    .fill(Color.orange)
+                    .frame(width: proxy.size.width * CGFloat(pendingVerification) / CGFloat(safeTotal))
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(width: proxy.size.width * CGFloat(remaining) / CGFloat(safeTotal))
+            }
+            .clipShape(Capsule())
+        }
+        .frame(height: 10)
     }
 
     private func isTaskCompleted(_ taskItem: WorkerSectionTaskItem) -> Bool {

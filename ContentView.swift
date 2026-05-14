@@ -364,75 +364,103 @@ private struct DemoModeContainerView: View {
             WalkthroughStep(
                 id: 2,
                 destination: .home,
+                targetID: .managerEmergency,
+                title: localized("Emergency Alert Controls", language),
+                message: localized("The Emergency section is now pinned near the top so Crew Leads can quickly send an evacuation alert without mixing it with routine controls.", language)
+            ),
+            WalkthroughStep(
+                id: 3,
+                destination: .home,
+                targetID: .crewSnapshot,
+                title: localized("Crew Snapshot", language),
+                message: localized("Crew Snapshot now rolls up all managed members across sections with on-site counts, verification load, status, and completion progress in one place.", language)
+            ),
+            WalkthroughStep(
+                id: 4,
+                destination: .home,
                 targetID: .overallTodos,
                 title: localized("Overall To-Do List", language),
                 message: localized("This dashboard list helps Crew Leads review leadership tasks, verification items, and priority work without leaving the home screen.", language)
             ),
             WalkthroughStep(
-                id: 3,
+                id: 5,
                 destination: .home,
                 targetID: .managedSectionCard,
                 title: localized("Section Management", language),
                 message: localized("Managed Sections is the main Crew Lead control area for opening sections, reviewing status, and organizing work by crew or site.", language)
             ),
             WalkthroughStep(
-                id: 4,
+                id: 6,
                 destination: .home,
                 targetID: .profile,
                 title: localized("Profile and Settings", language),
                 message: localized("The profile row gives Crew Leads access to account details, password changes, language settings, and shortcuts-related options.", language)
             ),
             WalkthroughStep(
-                id: 5,
+                id: 7,
+                destination: primarySectionDetail,
+                targetID: .sectionSnapshot,
+                title: localized("Section Snapshot", language),
+                message: localized("Inside each section, the snapshot shows member count, on-site status, due-today work, verification load, and progress bars for each person.", language)
+            ),
+            WalkthroughStep(
+                id: 8,
+                destination: primarySectionDetail,
+                targetID: .sectionBreakTime,
+                title: localized("Break Time Alert", language),
+                message: localized("Use the Break Time control from the section snapshot when you need to alert one section without sending a full emergency evacuation.", language)
+            ),
+            WalkthroughStep(
+                id: 9,
                 destination: primarySectionDetail,
                 targetID: .sectionFeatureControls,
                 title: localized("Section Feature Controls", language),
                 message: localized("The section controls let Crew Leads manage which tools are active, including time clock, group chats, section tasks, and personal to-dos.", language)
             ),
             WalkthroughStep(
-                id: 6,
+                id: 10,
                 destination: primarySectionDetail,
                 targetID: .sectionMembers,
                 title: localized("Member Management", language),
                 message: localized("Inside the section, Crew Leads can open the member area to review assigned people, roles, and field status.", language)
             ),
             WalkthroughStep(
-                id: 7,
+                id: 11,
                 destination: primarySectionDetail,
                 targetID: .sectionSubsections,
                 title: localized("Subsection Management", language),
                 message: localized("Open the subsection area inside the section to organize smaller crews, zones, or phases under the main section.", language)
             ),
             WalkthroughStep(
-                id: 8,
+                id: 12,
                 destination: primarySectionChats,
                 targetID: .sectionChats,
                 title: localized("Group Chats and Pinned Messages", language),
                 message: localized("Section chats keep crews aligned with pinned updates, media sharing, reactions, and message visibility controls.", language)
             ),
             WalkthroughStep(
-                id: 9,
+                id: 13,
                 destination: primarySectionDetail,
                 targetID: .sectionVerification,
                 title: localized("Task Review and Verification", language),
                 message: localized("The section task area shows completion progress and verification status so leads can follow work from assigned to confirmed.", language)
             ),
             WalkthroughStep(
-                id: 10,
+                id: 14,
                 destination: primarySectionTasks,
                 targetID: .sectionTaskAddButton,
                 title: localized("Section Task Creation", language),
                 message: localized("Crew Leads create section tasks here with assignees, due dates, priorities, checklists, and attachments.", language)
             ),
             WalkthroughStep(
-                id: 11,
+                id: 15,
                 destination: primarySectionTasks,
                 targetID: .sectionTasks,
                 title: localized("Progress Oversight", language),
                 message: localized("Task summaries inside the section make it easy to track progress, spot stalled work, and review what still needs attention.", language)
             ),
             WalkthroughStep(
-                id: 12,
+                id: 16,
                 destination: primarySectionTimeClock,
                 targetID: .memberTimeClock,
                 title: localized("Time Clock Visibility", language),
@@ -565,6 +593,16 @@ private struct DemoModeContainerView: View {
                 }
                 .pickerStyle(.segmented)
                 .transition(.move(edge: .top).combined(with: .opacity))
+
+                if activeRole == .manager {
+                    Button(localized("Replay Walkthrough", language)) {
+                        startManagerWalkthrough()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderedProminent)
+                    .tint(.arcAccentOrange)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
         }
         .padding(.horizontal, 10)

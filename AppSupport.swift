@@ -18,10 +18,14 @@ let arcLinkDemoAppStorageSuiteName = "ARCLinkDemoDefaults"
 enum WalkthroughTargetID: String, Hashable {
     case arcVisorButton
     case airQualityButton
+    case managerEmergency
+    case crewSnapshot
     case overallTodos
     case managedSectionCard
     case managedSectionCode
     case managedSectionSummary
+    case sectionSnapshot
+    case sectionBreakTime
     case sectionMembers
     case sectionSubsections
     case sectionVerification
@@ -197,11 +201,16 @@ struct CoachMarkOverlay: View {
         }
 
         let forceTopSlotTargets: Set<WalkthroughTargetID> = [
+            .crewSnapshot,
             .overallTodos,
+            .managedSectionCard,
             .sectionTasks,
             .memberTimeClock
         ]
         let forceBottomSlotTargets: Set<WalkthroughTargetID> = [
+            .managerEmergency,
+            .sectionSnapshot,
+            .sectionBreakTime,
             .airQualityButton,
             .sectionChats
         ]
@@ -236,6 +245,11 @@ private struct ARCLinkTaskSummary {
     let title: String
     let dueDate: Date
     let sourceLabel: String
+}
+
+private struct ARCLinkSectionAlertSummary {
+    let alert: SectionAlert
+    let sectionName: String
 }
 
 private func normalizedTaskMatchTitle(_ title: String) -> String {
@@ -511,6 +525,120 @@ private func assignTaskToCrewMember(
     }
 
     return nil
+}
+
+private func appendSectionAlert(
+    title: String,
+    message: String,
+    toMatchingSections predicate: (ManagerSection) -> Bool,
+    defaults: UserDefaults
+) -> Int {
+    var sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+    var updatedCount = 0
+
+    for index in sections.indices where predicate(sections[index]) {
+        sections[index].alerts.insert(
+            SectionAlert(title: title, message: message),
+            at: 0
+        )
+        updatedCount += 1
+    }
+
+    guard updatedCount > 0 else { return 0 }
+    defaults.set(encodeSections(sections), forKey: "managerSectionsJSON")
+    return updatedCount
+}
+
+private func appendEmergencyAlertForCurrentUser(defaults: UserDefaults) -> Int {
+    let title = "Emergency Evacuate"
+    let message = "Emergency evacuate. Leave the area and follow site evacuation procedures."
+    let roleRawValue = defaults.string(forKey: "profileRole") ?? AppRole.worker.rawValue
+    let role = AppRole(rawValue: roleRawValue) ?? .worker
+    let accountID = defaults.string(forKey: "profileAccountID") ?? ""
+    let phoneNumber = defaults.string(forKey: "profilePhoneNumber") ?? ""
+
+    switch role {
+    case .manager:
+        guard !accountID.isEmpty else { return 0 }
+        return appendSectionAlert(title: title, message: message, toMatchingSections: { section in
+            section.ownerAccountID == accountID
+        }, defaults: defaults)
+    case .worker:
+        return appendSectionAlert(title: title, message: message, toMatchingSections: { section in
+            section.members.contains(where: { memberMatchesCurrentProfile($0, accountID: accountID, phoneNumber: phoneNumber) })
+        }, defaults: defaults)
+    }
+}
+
+private func sendBreakTimeAlert(sectionName: String?, defaults: UserDefaults) -> String? {
+    let roleRawValue = defaults.string(forKey: "profileRole") ?? AppRole.worker.rawValue
+    guard AppRole(rawValue: roleRawValue) == .manager else {
+        return "This shortcut is only available for the Crew Lead role."
+    }
+
+    let accountID = defaults.string(forKey: "profileAccountID") ?? ""
+    guard !accountID.isEmpty else {
+        return "I couldn't determine the active Crew Lead account."
+    }
+
+    let trimmedSectionName = sectionName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    var sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+    let ownedIndices = sections.indices.filter { sections[$0].ownerAccountID == accountID }
+
+    guard !ownedIndices.isEmpty else {
+        return "I couldn't find any managed sections for the current Crew Lead account."
+    }
+
+    let targetIndex: Int?
+    if trimmedSectionName.isEmpty {
+        targetIndex = ownedIndices.count == 1 ? ownedIndices[0] : nil
+    } else {
+        targetIndex = ownedIndices.first {
+            sections[$0].name.compare(trimmedSectionName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }
+    }
+
+    guard let targetIndex else {
+        return trimmedSectionName.isEmpty
+            ? "Say the section name to send a break-time alert."
+            : "I couldn't find a managed section named \(trimmedSectionName)."
+    }
+
+    let sectionName = sections[targetIndex].name
+    sections[targetIndex].alerts.insert(
+        SectionAlert(
+            title: "Break Time",
+            message: "Break time for \(sectionName). Pause work and follow section break procedures."
+        ),
+        at: 0
+    )
+    defaults.set(encodeSections(sections), forKey: "managerSectionsJSON")
+    return "Sent a break-time alert to \(sectionName)."
+}
+
+private func latestSectionAlertForCurrentUser(defaults: UserDefaults) -> ARCLinkSectionAlertSummary? {
+    let roleRawValue = defaults.string(forKey: "profileRole") ?? AppRole.worker.rawValue
+    let role = AppRole(rawValue: roleRawValue) ?? .worker
+    let accountID = defaults.string(forKey: "profileAccountID") ?? ""
+    let phoneNumber = defaults.string(forKey: "profilePhoneNumber") ?? ""
+    let sections = decodeSections(from: defaults.string(forKey: "managerSectionsJSON") ?? "")
+
+    let relevantSections: [ManagerSection]
+    switch role {
+    case .manager:
+        relevantSections = currentOwnedSections(defaults: defaults)
+    case .worker:
+        relevantSections = sections.filter { section in
+            section.members.contains(where: { memberMatchesCurrentProfile($0, accountID: accountID, phoneNumber: phoneNumber) })
+        }
+    }
+
+    return relevantSections
+        .flatMap { section in
+            section.alerts.map { ARCLinkSectionAlertSummary(alert: $0, sectionName: section.name) }
+        }
+        .sorted { $0.alert.createdAt > $1.alert.createdAt }
+        .first
 }
 
 func decodeRegisteredProfiles(from rawValue: String) -> [RegisteredProfile] {
@@ -2065,6 +2193,71 @@ struct AssignTaskToCrewMemberIntent: AppIntent {
     }
 }
 
+struct SendEmergencyEvacuateIntent: AppIntent {
+    static let title: LocalizedStringResource = "Send Emergency Evacuate Alert"
+    static let description = IntentDescription("Sends the emergency evacuate alert to the current user's connected ARCLink sections.")
+    static let openAppWhenRun = false
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Send the emergency evacuate alert")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let defaults = arcLinkActiveUserDefaults()
+        let updatedCount = appendEmergencyAlertForCurrentUser(defaults: defaults)
+
+        guard updatedCount > 0 else {
+            return .result(dialog: "I couldn't find any connected sections for this account.")
+        }
+
+        let sectionLabel = updatedCount == 1 ? "section" : "sections"
+        return .result(dialog: IntentDialog("Sent the emergency evacuate alert to \(updatedCount) \(sectionLabel)."))
+    }
+}
+
+struct SendBreakTimeIntent: AppIntent {
+    static let title: LocalizedStringResource = "Send Break Time Alert"
+    static let description = IntentDescription("Sends a break-time alert to one managed ARCLink section.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Section Name")
+    var sectionName: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Send a break-time alert for \(\.$sectionName)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let defaults = arcLinkActiveUserDefaults()
+        let statusMessage = sendBreakTimeAlert(sectionName: sectionName, defaults: defaults) ??
+            "I couldn't send the break-time alert."
+        return .result(dialog: IntentDialog(stringLiteral: statusMessage))
+    }
+}
+
+struct ReadLatestSectionAlertIntent: AppIntent {
+    static let title: LocalizedStringResource = "Read Latest Section Alert"
+    static let description = IntentDescription("Reads the newest section alert for the current ARCLink account.")
+    static let openAppWhenRun = false
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Read the latest section alert")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let defaults = arcLinkActiveUserDefaults()
+        guard let summary = latestSectionAlertForCurrentUser(defaults: defaults) else {
+            return .result(dialog: "There are no active section alerts right now.")
+        }
+
+        let dialog = "\(summary.alert.title) for \(summary.sectionName). \(summary.alert.message)"
+        return .result(dialog: IntentDialog(stringLiteral: dialog))
+    }
+}
+
 struct ARCLinkShortcutsProvider: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -2081,7 +2274,8 @@ struct ARCLinkShortcutsProvider: AppShortcutsProvider {
             intent: CompleteTaskIntent(),
             phrases: [
                 "Mark an existing task complete with \(.applicationName)",
-                "Finish an existing task with \(.applicationName)"
+                "Finish an existing task with \(.applicationName)",
+                "Mark my crew task done with \(.applicationName)"
             ],
             shortTitle: "Complete Task",
             systemImageName: "checkmark.circle"
@@ -2091,7 +2285,8 @@ struct ARCLinkShortcutsProvider: AppShortcutsProvider {
             phrases: [
                 "Read my tasks with \(.applicationName)",
                 "What are my tasks with \(.applicationName)",
-                "Show my tasks with \(.applicationName)"
+                "Show my tasks with \(.applicationName)",
+                "What work do I have with \(.applicationName)"
             ],
             shortTitle: "Read My Tasks",
             systemImageName: "list.bullet.clipboard"
@@ -2105,6 +2300,37 @@ struct ARCLinkShortcutsProvider: AppShortcutsProvider {
             ],
             shortTitle: "Dispatch Work",
             systemImageName: "person.badge.plus"
+        )
+        AppShortcut(
+            intent: SendEmergencyEvacuateIntent(),
+            phrases: [
+                "Send emergency evacuate with \(.applicationName)",
+                "Trigger emergency evacuate with \(.applicationName)",
+                "Evacuate the crew with \(.applicationName)",
+                "Send an emergency alert to my crew with \(.applicationName)"
+            ],
+            shortTitle: "Emergency Alert",
+            systemImageName: "exclamationmark.triangle.fill"
+        )
+        AppShortcut(
+            intent: SendBreakTimeIntent(),
+            phrases: [
+                "Send break time with \(.applicationName)",
+                "Call break time with \(.applicationName)",
+                "Start crew break with \(.applicationName)"
+            ],
+            shortTitle: "Break Time",
+            systemImageName: "cup.and.saucer.fill"
+        )
+        AppShortcut(
+            intent: ReadLatestSectionAlertIntent(),
+            phrases: [
+                "Read my latest crew alert with \(.applicationName)",
+                "Do I have any crew alerts with \(.applicationName)",
+                "What is the latest section alert with \(.applicationName)"
+            ],
+            shortTitle: "Read Alert",
+            systemImageName: "speaker.wave.2.fill"
         )
     }
 

@@ -40,6 +40,23 @@ struct ManagerLeadershipTodoItem: Identifiable {
 }
 
 struct ManagerHomeView: View {
+    private struct SnapshotMetric: Identifiable {
+        let id = UUID()
+        let title: String
+        let value: String
+        let systemImage: String
+        let tint: Color
+    }
+
+    private struct ManagedSnapshotMember: Identifiable {
+        let id: String
+        var member: SectionMember
+        var sectionNames: [String]
+        var assignedTaskCount: Int
+        var completedTaskCount: Int
+        var pendingTaskCount: Int
+    }
+
     let profileName: String
     let walkthroughDestination: DemoDestination
     let walkthroughFocusTarget: WalkthroughTargetID?
@@ -60,6 +77,7 @@ struct ManagerHomeView: View {
     @State private var showCreateSectionSheet = false
     @State private var newSectionName = ""
     @State private var showARCVisor = false
+    @State private var emergencyStatusMessage = ""
     @State private var showJoinSectionSheet = false
     @State private var joinSectionCode = ""
     @State private var joinSectionStatusMessage = ""
@@ -68,6 +86,7 @@ struct ManagerHomeView: View {
     @State private var renameSectionName = ""
     @State private var renameSectionID: UUID?
     @State private var expandedManagedSectionIDs: Set<UUID> = []
+    @State private var isCrewSnapshotExpanded = true
     @State private var isOverallTodoExpanded = false
     @State private var showAddPersonalTodoSheet = false
     @State private var newManagerTodoTitle = ""
@@ -142,10 +161,240 @@ struct ManagerHomeView: View {
         }
     }
 
+    private var managedSnapshotMembers: [ManagedSnapshotMember] {
+        var buckets: [String: ManagedSnapshotMember] = [:]
+
+        for section in allManagedSections {
+            for member in section.members {
+                let key = managedSnapshotMemberKey(for: member)
+                let assignedTasks = assignedTaskCount(for: member, in: section)
+                let completedTasks = completedTaskCount(for: member, in: section)
+                let pendingTasks = pendingTaskCount(for: member, in: section)
+
+                if var existing = buckets[key] {
+                    existing.sectionNames = Array(Set(existing.sectionNames + [section.name])).sorted()
+                    existing.assignedTaskCount += assignedTasks
+                    existing.completedTaskCount += completedTasks
+                    existing.pendingTaskCount += pendingTasks
+                    if member.isOnSite {
+                        existing.member.isOnSite = true
+                    }
+                    if existing.member.clockInTime == nil || ((member.clockInTime ?? .distantPast) > (existing.member.clockInTime ?? .distantPast)) {
+                        existing.member.clockInTime = member.clockInTime
+                    }
+                    if existing.member.clockOutTime == nil || ((member.clockOutTime ?? .distantPast) > (existing.member.clockOutTime ?? .distantPast)) {
+                        existing.member.clockOutTime = member.clockOutTime
+                    }
+                    existing.member.todos = mergeTodos(existing.member.todos, member.todos)
+                    buckets[key] = existing
+                } else {
+                    buckets[key] = ManagedSnapshotMember(
+                        id: key,
+                        member: member,
+                        sectionNames: [section.name],
+                        assignedTaskCount: assignedTasks,
+                        completedTaskCount: completedTasks,
+                        pendingTaskCount: pendingTasks
+                    )
+                }
+            }
+        }
+
+        return buckets.values.sorted { lhs, rhs in
+            managerVisibleName(lhs.member, nicknamesRaw: managerCrewNicknamesRaw) < managerVisibleName(rhs.member, nicknamesRaw: managerCrewNicknamesRaw)
+        }
+    }
+
+    private var allManagedSections: [ManagerSection] {
+        allSections
+            .filter { isOwnedSection($0) }
+            .sorted { lhs, rhs in
+                if lhs.parentSectionID == rhs.parentSectionID {
+                    return lhs.name < rhs.name
+                }
+                return lhs.parentSectionID == nil && rhs.parentSectionID != nil
+            }
+    }
+
+    private var overviewMetrics: [SnapshotMetric] {
+        return [
+            SnapshotMetric(title: localized("Members", language), value: "\(managedSnapshotMembers.count)", systemImage: "person.3.fill", tint: .blue),
+            SnapshotMetric(title: localized("On Site", language), value: "\(managedSnapshotMembers.filter(\.member.isOnSite).count)", systemImage: "checkmark.seal.fill", tint: .green),
+            SnapshotMetric(title: localized("Due Today", language), value: "\(allManagedSections.reduce(0) { $0 + dueTodayCount(in: $1) })", systemImage: "calendar", tint: .orange),
+            SnapshotMetric(title: localized("To Verify", language), value: "\(allManagedSections.reduce(0) { $0 + awaitingVerificationCount(in: $1) })", systemImage: "clock.badge.checkmark.fill", tint: .red)
+        ]
+    }
+
     private func subsections(for parentID: UUID) -> [ManagerSection] {
         allSections
             .filter { $0.parentSectionID == parentID && isOwnedSection($0) }
             .sorted { $0.name < $1.name }
+    }
+
+    private func managedSnapshotMemberKey(for member: SectionMember) -> String {
+        if let accountID = member.accountID, !accountID.isEmpty {
+            return "account-\(accountID)"
+        }
+
+        let normalizedPhone = member.phoneNumber.filter(\.isNumber)
+        if !normalizedPhone.isEmpty {
+            return "phone-\(normalizedPhone)"
+        }
+
+        return "member-\(member.id.uuidString)"
+    }
+
+    private func mergeTodos(_ lhs: [MemberTodo], _ rhs: [MemberTodo]) -> [MemberTodo] {
+        var merged = lhs
+        for todo in rhs where !merged.contains(where: { $0.id == todo.id }) {
+            merged.append(todo)
+        }
+        return merged
+    }
+
+    private func dueTodayCount(in section: ManagerSection) -> Int {
+        let calendar = Calendar.current
+        let sectionTasks = section.sectionTasks.filter { calendar.isDateInToday($0.dueDate) }.count
+        let todos = section.members.flatMap(\.todos).filter { calendar.isDateInToday($0.dueDate) }.count
+        return sectionTasks + todos
+    }
+
+    private func awaitingVerificationCount(in section: ManagerSection) -> Int {
+        let tasks = section.sectionTasks.filter { task in
+            task.requiresAcknowledgement && task.doneMemberIDs.contains(where: { !task.verifiedMemberIDs.contains($0) })
+        }.count
+        let todos = section.members.flatMap(\.todos).filter {
+            $0.requiresAcknowledgement && $0.isMarkedDone && !$0.isCompleted
+        }.count
+        return tasks + todos
+    }
+
+    private func assignedTaskCount(for member: SectionMember, in section: ManagerSection) -> Int {
+        section.sectionTasks.filter { $0.assigneeIDs.contains(member.id) }.count
+    }
+
+    private func completedTaskCount(for member: SectionMember, in section: ManagerSection) -> Int {
+        section.sectionTasks.filter {
+            $0.requiresAcknowledgement ? $0.verifiedMemberIDs.contains(member.id) : $0.doneMemberIDs.contains(member.id)
+        }.count
+    }
+
+    private func completedTodoCount(for member: SectionMember) -> Int {
+        member.todos.filter { $0.requiresAcknowledgement ? $0.isCompleted : $0.isMarkedDone }.count
+    }
+
+    private func pendingTaskCount(for member: SectionMember, in section: ManagerSection) -> Int {
+        section.sectionTasks.filter {
+            $0.requiresAcknowledgement &&
+            $0.assigneeIDs.contains(member.id) &&
+            $0.doneMemberIDs.contains(member.id) &&
+            !$0.verifiedMemberIDs.contains(member.id)
+        }.count
+    }
+
+    private func pendingTodoCount(for member: SectionMember) -> Int {
+        member.todos.filter {
+            $0.requiresAcknowledgement && $0.isMarkedDone && !$0.isCompleted
+        }.count
+    }
+
+    private func homeStackedProgressBar(completed: Int, pendingVerification: Int, total: Int) -> some View {
+        let remaining = max(total - completed - pendingVerification, 0)
+        let safeTotal = max(total, 1)
+
+        return GeometryReader { proxy in
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.green)
+                    .frame(width: proxy.size.width * CGFloat(completed) / CGFloat(safeTotal))
+                Rectangle()
+                    .fill(Color.orange)
+                    .frame(width: proxy.size.width * CGFloat(pendingVerification) / CGFloat(safeTotal))
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(width: proxy.size.width * CGFloat(remaining) / CGFloat(safeTotal))
+            }
+            .clipShape(Capsule())
+        }
+        .frame(height: 10)
+    }
+
+    private func memberStatusLabel(_ member: SectionMember, in section: ManagerSection) -> String {
+        let hasAwaitingTaskVerification = section.sectionTasks.contains { task in
+            task.requiresAcknowledgement &&
+            task.assigneeIDs.contains(member.id) &&
+            task.doneMemberIDs.contains(member.id) &&
+            !task.verifiedMemberIDs.contains(member.id)
+        }
+        let hasAwaitingTodoVerification = member.todos.contains {
+            $0.requiresAcknowledgement && $0.isMarkedDone && !$0.isCompleted
+        }
+
+        if hasAwaitingTaskVerification || hasAwaitingTodoVerification {
+            return localized("Awaiting Verify", language)
+        }
+        return member.isOnSite ? localized("On Site", language) : localized("Off Site", language)
+    }
+
+    private func memberStatusColor(_ member: SectionMember, in section: ManagerSection) -> Color {
+        memberStatusLabel(member, in: section) == localized("Awaiting Verify", language)
+            ? .orange
+            : (member.isOnSite ? .green : .secondary)
+    }
+
+    private func aggregatedMemberStatusLabel(_ item: ManagedSnapshotMember) -> String {
+        if item.pendingTaskCount > 0 || pendingTodoCount(for: item.member) > 0 {
+            return localized("Awaiting Verify", language)
+        }
+        return item.member.isOnSite ? localized("On Site", language) : localized("Off Site", language)
+    }
+
+    private func aggregatedMemberStatusColor(_ item: ManagedSnapshotMember) -> Color {
+        aggregatedMemberStatusLabel(item) == localized("Awaiting Verify", language)
+            ? .orange
+            : (item.member.isOnSite ? .green : .secondary)
+    }
+
+    private func summaryHeatmapCell(completed: Int, total: Int) -> some View {
+        let ratio = total == 0 ? 0 : Double(completed) / Double(total)
+        let color: Color
+        switch ratio {
+        case ..<0.34:
+            color = .red
+        case ..<0.67:
+            color = .orange
+        default:
+            color = .green
+        }
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill((total == 0 ? Color.secondary : color).opacity(total == 0 ? 0.14 : 0.22))
+                .frame(width: 40, height: 30)
+            Text(total == 0 ? "0" : "\(completed)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(total == 0 ? .secondary : color)
+        }
+    }
+
+    private var heatmapLegend: some View {
+        HStack(spacing: 10) {
+            heatmapLegendItem(color: .red, label: localized("Low", language))
+            heatmapLegendItem(color: .orange, label: localized("Partial", language))
+            heatmapLegendItem(color: .green, label: localized("Strong", language))
+            heatmapLegendItem(color: .secondary, label: localized("No items", language), usesMutedStyle: true)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+
+    private func heatmapLegendItem(color: Color, label: String, usesMutedStyle: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(color.opacity(usesMutedStyle ? 0.2 : 0.8))
+                .frame(width: 10, height: 10)
+            Text(label)
+        }
     }
 
     private func leadershipTodoItems(for section: ManagerSection) -> [ManagerLeadershipTodoItem] {
@@ -224,7 +473,9 @@ struct ManagerHomeView: View {
             ScrollViewReader { scrollProxy in
                 List {
                     managerHeaderSection
+                    managerEmergencySection
                     managerARCVisorSection
+                    managerCrewSnapshotSection
                     managerOverallTodoSection
                     managerManagedSectionsSection
                     managerLeadershipSectionsSection
@@ -529,6 +780,136 @@ struct ManagerHomeView: View {
         }
     }
 
+    private var managerEmergencySection: some View {
+        Section(localized("Emergency", language)) {
+            Button {
+                sendEmergencyEvacuate()
+            } label: {
+                Label("Emergency Evacuate", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .disabled(!bluetoothManager.isConnected())
+
+            if !emergencyStatusMessage.isEmpty {
+                Text(emergencyStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .id(WalkthroughTargetID.managerEmergency.rawValue)
+        .walkthroughTarget(.managerEmergency)
+    }
+
+    @ViewBuilder
+    private var managerCrewSnapshotSection: some View {
+        if !managedSnapshotMembers.isEmpty {
+            Section {
+                DisclosureGroup(isExpanded: $isCrewSnapshotExpanded) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Text(localized("All Managed Members", language))
+                                .font(.headline)
+                            Spacer()
+                            Text("\(allManagedSections.count) \(localized("sections", language).lowercased())")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            ForEach(overviewMetrics) { metric in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label(metric.title, systemImage: metric.systemImage)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(metric.tint)
+                                    Text(metric.value)
+                                        .font(.title3.weight(.bold))
+                                    Rectangle()
+                                        .fill(metric.tint.opacity(0.18))
+                                        .frame(height: 5)
+                                        .clipShape(Capsule())
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(localized("Member Status Board", language))
+                                .font(.subheadline.weight(.semibold))
+
+                            ForEach(managedSnapshotMembers.prefix(6)) { item in
+                                HStack(spacing: 10) {
+                                    Circle()
+                                        .fill(aggregatedMemberStatusColor(item))
+                                        .frame(width: 10, height: 10)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(managerVisibleName(item.member, nicknamesRaw: managerCrewNicknamesRaw))
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Text(item.sectionNames.joined(separator: ", "))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(aggregatedMemberStatusLabel(item))
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(aggregatedMemberStatusColor(item).opacity(0.15), in: Capsule())
+                                        .foregroundStyle(aggregatedMemberStatusColor(item))
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(localized("Completion Overview", language))
+                                .font(.subheadline.weight(.semibold))
+
+                            ForEach(managedSnapshotMembers.prefix(6)) { item in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(managerVisibleName(item.member, nicknamesRaw: managerCrewNicknamesRaw))
+                                                .font(.caption.weight(.semibold))
+                                                .lineLimit(1)
+                                            Text(item.sectionNames.joined(separator: ", "))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Text("\(item.completedTaskCount + completedTodoCount(for: item.member))/\(item.assignedTaskCount + item.member.todos.count)")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    homeStackedProgressBar(
+                                        completed: item.completedTaskCount + completedTodoCount(for: item.member),
+                                        pendingVerification: item.pendingTaskCount + pendingTodoCount(for: item.member),
+                                        total: item.assignedTaskCount + item.member.todos.count
+                                    )
+                                    HStack {
+                                        Text("\(localized("Tasks", language)): \(item.completedTaskCount)/\(item.assignedTaskCount)")
+                                        Spacer()
+                                        Text("\(localized("To-Dos", language)): \(completedTodoCount(for: item.member))/\(item.member.todos.count)")
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } label: {
+                    Text(localized("Crew Snapshot", language))
+                }
+            }
+            .id(WalkthroughTargetID.crewSnapshot.rawValue)
+            .walkthroughTarget(.crewSnapshot)
+        }
+    }
+
     private var managerOverallTodoSection: some View {
         Section {
             DisclosureGroup(isExpanded: $isOverallTodoExpanded) {
@@ -783,8 +1164,17 @@ struct ManagerHomeView: View {
         guard let walkthroughFocusTarget else { return }
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.25)) {
-                scrollProxy.scrollTo(walkthroughFocusTarget.rawValue, anchor: .center)
+                scrollProxy.scrollTo(walkthroughFocusTarget.rawValue, anchor: walkthroughScrollAnchor(for: walkthroughFocusTarget))
             }
+        }
+    }
+
+    private func walkthroughScrollAnchor(for target: WalkthroughTargetID) -> UnitPoint {
+        switch target {
+        case .overallTodos, .managedSectionCard:
+            return .top
+        default:
+            return .center
         }
     }
 
@@ -793,6 +1183,12 @@ struct ManagerHomeView: View {
             isOverallTodoExpanded = true
         } else if walkthroughFocusTarget != nil {
             isOverallTodoExpanded = false
+        }
+
+        if walkthroughFocusTarget == .crewSnapshot {
+            isCrewSnapshotExpanded = true
+        } else if walkthroughFocusTarget != nil {
+            isCrewSnapshotExpanded = false
         }
 
         switch destination {
@@ -879,6 +1275,37 @@ struct ManagerHomeView: View {
         let managedIDs = Set(managerSections.map(\.id))
         let remainingSections = allStoredSections.filter { !managedIDs.contains($0.id) }
         managerSectionsRaw = encodeSections(managerSections + remainingSections)
+    }
+
+    private func sendEmergencyEvacuate() {
+        guard bluetoothManager.isConnected() else {
+            emergencyStatusMessage = "Bluetooth not connected."
+            return
+        }
+
+        do {
+            try bluetoothManager.writeString("{\"message\":\"emergancy evacuate\"}")
+            appendEmergencyAlertToManagedSections()
+            emergencyStatusMessage = "Emergency evacuate sent."
+        } catch {
+            emergencyStatusMessage = "Failed to send emergency evacuate."
+        }
+    }
+
+    private func appendEmergencyAlertToManagedSections() {
+        var sections = decodeSections(from: managerSectionsRaw)
+        let managedIDs = Set(allManagedSections.map(\.id))
+        for index in sections.indices where managedIDs.contains(sections[index].id) {
+            sections[index].alerts.insert(
+                SectionAlert(
+                    title: "Emergency Evacuate",
+                    message: "Emergency evacuate. Leave the area and follow site evacuation procedures."
+                ),
+                at: 0
+            )
+        }
+        managerSectionsRaw = encodeSections(sections)
+        managerSections = ownedSections(from: managerSectionsRaw)
     }
 
     private func seedDemoSectionIfNeeded() {
@@ -1449,6 +1876,7 @@ struct ManagerSectionDashboardView: View {
     let onSave: () -> Void
     let onOpenGroupChat: (UUID) -> Void
 
+    @Environment(BluetoothManager.self) private var bluetoothManager
     @State private var showCreateChatSheet = false
     @State private var showSectionSettingsSheet = false
     @State private var showCreateSubsectionSheet = false
@@ -1475,6 +1903,8 @@ struct ManagerSectionDashboardView: View {
     @State private var sectionTaskViewMode: TaskTimelineView = .calendar
     @State private var selectedSectionTaskDate = Date()
     @State private var selectedSectionTaskWeekAnchor = Date()
+    @State private var isSectionSnapshotExpanded = true
+    @State private var breakStatusMessage = ""
     @State private var areMembersExpanded = true
     @State private var areSubsectionsExpanded = true
     @State private var walkthroughMemberID: UUID?
@@ -1491,6 +1921,10 @@ struct ManagerSectionDashboardView: View {
         decodeSections(from: managerSectionsRaw)
             .filter { $0.parentSectionID == section.id }
             .sorted { $0.name < $1.name }
+    }
+
+    private var latestSectionAlert: SectionAlert? {
+        section.alerts.sorted { $0.createdAt > $1.createdAt }.first
     }
 
     var body: some View {
@@ -1551,10 +1985,30 @@ struct ManagerSectionDashboardView: View {
 
     private var dashboardList: some View {
         List {
+            if let latestSectionAlert {
+                sectionAlertSection(latestSectionAlert)
+            }
+            sectionInsightsSection
             membersSection
             subsectionsSection
             groupChatsSection
             verificationAndTaskSections
+        }
+    }
+
+    private func sectionAlertSection(_ alert: SectionAlert) -> some View {
+        Section(localized("Alert", language)) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(alert.title, systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline)
+                    .foregroundStyle(.red)
+                Text(alert.message)
+                    .font(.body)
+                Text(alert.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
         }
     }
 
@@ -1588,6 +2042,91 @@ struct ManagerSectionDashboardView: View {
             )
         }
         .navigationViewStyle(.stack)
+    }
+
+    private var sectionInsightsSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $isSectionSnapshotExpanded) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        snapshotBadge(title: localized("Members", language), value: "\(section.members.count)", tint: .blue)
+                        snapshotBadge(title: localized("On Site", language), value: "\(section.members.filter(\.isOnSite).count)", tint: .green)
+                    }
+
+                HStack {
+                    snapshotBadge(title: localized("Due Today", language), value: "\(sectionDueTodayCount)", tint: .orange)
+                    snapshotBadge(title: localized("To Verify", language), value: "\(tasksAwaitingVerification.count + personalTodosAwaitingVerification.count)", tint: .red)
+                }
+
+                Button {
+                    sendBreakTime()
+                } label: {
+                    Label("Break Time", systemImage: "pause.circle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .overlay {
+                    if walkthroughFocusTarget == .sectionBreakTime {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.orange, lineWidth: 3)
+                            .padding(-2)
+                    }
+                }
+                .background {
+                    if walkthroughFocusTarget == .sectionBreakTime {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.orange.opacity(0.14))
+                    }
+                }
+                .disabled(!bluetoothManager.isConnected())
+                .id(WalkthroughTargetID.sectionBreakTime.rawValue)
+                .walkthroughTarget(walkthroughFocusTarget == .sectionBreakTime ? .sectionBreakTime : nil)
+
+                if !breakStatusMessage.isEmpty {
+                    Text(breakStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(localized("Completion Overview", language))
+                    .font(.headline)
+
+                    ForEach(section.members) { member in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text("\(memberCompletedAssignments(member))/\(memberAssignedAssignments(member))")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            stackedProgressBar(
+                                completed: memberCompletedAssignments(member),
+                                pendingVerification: memberPendingVerificationAssignments(member),
+                                total: memberAssignedAssignments(member)
+                            )
+
+                            HStack {
+                                Text("\(localized("Tasks", language)): \(completedSectionTaskCount(for: member.id))/\(assignedSectionTaskCount(for: member.id))")
+                                Spacer()
+                                Text("\(localized("To-Dos", language)): \(completedPersonalTodoCount(for: member))/\(member.todos.count)")
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .padding(.vertical, 4)
+            } label: {
+                Text(localized("Section Snapshot", language))
+            }
+        }
+        .id(WalkthroughTargetID.sectionSnapshot.rawValue)
+        .walkthroughTarget(.sectionSnapshot)
     }
 
     private var subsectionComposer: some View {
@@ -2248,6 +2787,90 @@ struct ManagerSectionDashboardView: View {
         section.sectionTasks.filter { finalCompletionMemberIDs(for: $0).contains(memberID) }.count
     }
 
+    private var sectionDueTodayCount: Int {
+        let calendar = Calendar.current
+        let sectionTasks = section.sectionTasks.filter { calendar.isDateInToday($0.dueDate) }.count
+        let todos = section.members.flatMap(\.todos).filter { calendar.isDateInToday($0.dueDate) }.count
+        return sectionTasks + todos
+    }
+
+    private func completedPersonalTodoCount(for member: SectionMember) -> Int {
+        member.todos.filter { personalTodoIsCompleted($0) }.count
+    }
+
+    private func memberAssignedAssignments(_ member: SectionMember) -> Int {
+        assignedSectionTaskCount(for: member.id) + member.todos.count
+    }
+
+    private func memberCompletedAssignments(_ member: SectionMember) -> Int {
+        completedSectionTaskCount(for: member.id) + completedPersonalTodoCount(for: member)
+    }
+
+    private func memberPendingVerificationAssignments(_ member: SectionMember) -> Int {
+        let taskCount = section.sectionTasks.filter {
+            $0.requiresAcknowledgement &&
+            $0.assigneeIDs.contains(member.id) &&
+            $0.doneMemberIDs.contains(member.id) &&
+            !$0.verifiedMemberIDs.contains(member.id)
+        }.count
+        let todoCount = member.todos.filter {
+            $0.requiresAcknowledgement && $0.isMarkedDone && !$0.isCompleted
+        }.count
+        return taskCount + todoCount
+    }
+
+    private func sendBreakTime() {
+        guard bluetoothManager.isConnected() else {
+            breakStatusMessage = "Bluetooth not connected."
+            return
+        }
+
+        do {
+            try bluetoothManager.writeString("{\"message\":\"break time\"}")
+            breakStatusMessage = "Break time sent."
+        } catch {
+            breakStatusMessage = "Failed to send break time."
+        }
+    }
+
+    private func personalTodoIsCompleted(_ todo: MemberTodo) -> Bool {
+        todo.requiresAcknowledgement ? todo.isCompleted : todo.isMarkedDone
+    }
+
+    private func snapshotBadge(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+            Text(value)
+                .font(.title3.weight(.bold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func stackedProgressBar(completed: Int, pendingVerification: Int, total: Int) -> some View {
+        let remaining = max(total - completed - pendingVerification, 0)
+        let safeTotal = max(total, 1)
+
+        return GeometryReader { proxy in
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.green)
+                    .frame(width: proxy.size.width * CGFloat(completed) / CGFloat(safeTotal))
+                Rectangle()
+                    .fill(Color.orange)
+                    .frame(width: proxy.size.width * CGFloat(pendingVerification) / CGFloat(safeTotal))
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(width: proxy.size.width * CGFloat(remaining) / CGFloat(safeTotal))
+            }
+            .clipShape(Capsule())
+        }
+        .frame(height: 10)
+    }
+
     private func resetTaskComposer() {
         newSectionTaskTitle = ""
         newSectionTaskDescription = ""
@@ -2392,6 +3015,10 @@ struct ManagerSectionDashboardView: View {
     }
 
     private func applyWalkthroughDestination(_ destination: DemoDestination) {
+        if walkthroughFocusTarget == .sectionSnapshot || walkthroughFocusTarget == .sectionBreakTime {
+            isSectionSnapshotExpanded = true
+        }
+
         if walkthroughFocusTarget == .sectionSubsections {
             areSubsectionsExpanded = true
         }
