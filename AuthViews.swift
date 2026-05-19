@@ -289,8 +289,8 @@ struct SignInOnboardingView: View {
         }
 
         if createSelectedRole == .worker {
-            Section(localized("Section Access", authLanguage)) {
-                TextField(localized("Section code word", authLanguage), text: $createSiteCode)
+            Section(localized("Crew Access", authLanguage)) {
+                TextField(localized("Crew code word", authLanguage), text: $createSiteCode)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
                 Text(localized("Enter the section code word from your crew lead to join the right crew.", authLanguage))

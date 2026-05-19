@@ -44,6 +44,7 @@ struct WorkerHomeView: View {
     @AppStorage("profileLanguage") private var profileLanguageRawValue = AppLanguage.english.rawValue
     @State private var showARCVisor = false
     @State private var emergencyStatusMessage = ""
+    @State private var taskSearchText = ""
 
     private let updates: [CrewMessage] = [
         CrewMessage(sender: "Foreman", text: "Meet at Gate C for safety brief.", time: "6:45 AM"),
@@ -98,6 +99,28 @@ struct WorkerHomeView: View {
         return items.sorted { $0.todo.dueDate < $1.todo.dueDate }
     }
 
+    private var filteredAssignedSectionTasks: [WorkerSectionTaskItem] {
+        let query = taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return assignedSectionTasks }
+        let normalizedQuery = query.lowercased()
+        return assignedSectionTasks.filter { item in
+            item.task.title.lowercased().contains(normalizedQuery) ||
+            item.task.descriptionText.lowercased().contains(normalizedQuery) ||
+            item.sectionName.lowercased().contains(normalizedQuery)
+        }
+    }
+
+    private var filteredPersonalTodos: [WorkerPersonalTodoItem] {
+        let query = taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return personalTodos }
+        let normalizedQuery = query.lowercased()
+        return personalTodos.filter { item in
+            item.todo.title.lowercased().contains(normalizedQuery) ||
+            item.todo.descriptionText.lowercased().contains(normalizedQuery) ||
+            item.sectionName.lowercased().contains(normalizedQuery)
+        }
+    }
+
     private var availableChats: [SectionGroupChat] {
         guard let section = currentSection, let member = currentMember else { return [] }
         return section.groupChats.filter {
@@ -126,7 +149,7 @@ struct WorkerHomeView: View {
     private var arcVisorPayloadContext: ARCVisorPayloadContext {
         ARCVisorPayloadContext(
             userName: abbreviatedDisplayName(profileName),
-            roleTitle: "Crew",
+            roleTitle: "Crew Member",
             profileAccountID: "",
             profilePhoneNumber: profilePhoneNumber,
             managerSectionsRaw: managerSectionsRaw,
@@ -191,7 +214,7 @@ struct WorkerHomeView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("ARCLink")
                             .font(.title2.weight(.semibold))
-                        Text(greetingText(name: profileName.isEmpty ? localized("Crew", language) : abbreviatedDisplayName(profileName), language: language))
+                        Text(greetingText(name: profileName.isEmpty ? localized("Crew Member", language) : abbreviatedDisplayName(profileName), language: language))
                             .font(.largeTitle.weight(.bold))
                     }
                     .padding(.vertical, 4)
@@ -270,11 +293,11 @@ struct WorkerHomeView: View {
 
                 if !assignedSectionTasks.isEmpty || relatedSections.contains(where: \.featureSettings.sectionTasksEnabled) {
                     Section(localized("Assigned Tasks", language)) {
-                        if assignedSectionTasks.isEmpty {
-                            Text("No section tasks assigned to you yet.")
+                        if filteredAssignedSectionTasks.isEmpty {
+                            Text(taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No section tasks assigned to you yet." : localized("No matching tasks.", language))
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(assignedSectionTasks) { taskItem in
+                            ForEach(filteredAssignedSectionTasks) { taskItem in
                                 HStack(alignment: .top, spacing: 12) {
                                     Button {
                                         setTaskCompletion(taskItem: taskItem, isCompleted: !isTaskMarkedDone(taskItem))
@@ -334,11 +357,11 @@ struct WorkerHomeView: View {
 
                 if !personalTodos.isEmpty || relatedSections.contains(where: \.featureSettings.personalTodosEnabled) {
                     Section(localized("Personal To-Dos", language)) {
-                        if personalTodos.isEmpty {
-                            Text("No personal to-dos assigned.")
+                        if filteredPersonalTodos.isEmpty {
+                            Text(taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No personal to-dos assigned." : localized("No matching tasks.", language))
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(personalTodos) { todoItem in
+                            ForEach(filteredPersonalTodos) { todoItem in
                                 HStack(alignment: .top, spacing: 12) {
                                     Button {
                                         setPersonalTodoCompletion(todoItem: todoItem, isCompleted: !isPersonalTodoCompleted(todoItem.todo))
@@ -550,7 +573,7 @@ struct WorkerHomeView: View {
     }
 
     private var workerEmergencySection: some View {
-        Section(localized("Emergency", language)) {
+        Section {
             Button {
                 sendEmergencyEvacuate()
             } label: {
@@ -1801,15 +1824,15 @@ public struct WorkerProfileDetailView: View {
     public var body: some View {
         List {
             Section(localized("Profile", language)) {
-                Text(profileName.isEmpty ? "Crew" : profileName)
-                Text(localized("Role: Crew", language))
+                Text(profileName.isEmpty ? "Crew Member" : profileName)
+                Text(localized("Role: Crew Member", language))
                     .foregroundStyle(.secondary)
                 if !savedProfileEmail.isEmpty {
                     Text(localized("Email", language) + ": \(savedProfileEmail)")
                         .foregroundStyle(.secondary)
                 }
                 if !sectionName.isEmpty {
-                    Text(localized("Section", language) + ": \(sectionName)")
+                    Text(localized("Crew", language) + ": \(sectionName)")
                         .foregroundStyle(.secondary)
                 }
                 if !sectionCode.isEmpty {
@@ -1818,18 +1841,18 @@ public struct WorkerProfileDetailView: View {
                 }
             }
             
-            Section(localized("Section Membership", language)) {
+            Section(localized("Crew Membership", language)) {
                 if !sectionName.isEmpty {
-                    Text(localized("Section", language) + ": \(sectionName)")
+                    Text(localized("Crew", language) + ": \(sectionName)")
                         .foregroundStyle(.secondary)
                 }
                 
                 if subsectionNames.isEmpty {
-                    Text(localized("No subsections assigned.", language))
+                    Text(localized("No sub-crews assigned.", language))
                         .foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(localized("Subsections", language))
+                        Text(localized("Sub-crews", language))
                             .font(.subheadline.weight(.semibold))
                         ForEach(subsectionNames, id: \.self) { name in
                             Text(name)

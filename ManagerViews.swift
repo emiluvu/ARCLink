@@ -40,6 +40,25 @@ struct ManagerLeadershipTodoItem: Identifiable {
 }
 
 struct ManagerHomeView: View {
+    private enum OverallTodoTimelineView: String, CaseIterable, Identifiable {
+        case month
+        case week
+        case day
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .month:
+                return "Month"
+            case .week:
+                return "Week"
+            case .day:
+                return "Day"
+            }
+        }
+    }
+
     private struct SnapshotMetric: Identifiable {
         let id = UUID()
         let title: String
@@ -88,6 +107,10 @@ struct ManagerHomeView: View {
     @State private var expandedManagedSectionIDs: Set<UUID> = []
     @State private var isCrewSnapshotExpanded = true
     @State private var isOverallTodoExpanded = false
+    @State private var taskSearchText = ""
+    @State private var overallTodoViewMode: OverallTodoTimelineView = .month
+    @State private var selectedOverallTodoDate = Date()
+    @State private var selectedOverallTodoWeekAnchor = Date()
     @State private var showAddPersonalTodoSheet = false
     @State private var newManagerTodoTitle = ""
     @State private var newManagerTodoDueDate = Date()
@@ -140,6 +163,16 @@ struct ManagerHomeView: View {
             items.append(contentsOf: leadershipTodoItems(for: section))
         }
         return items.sorted { $0.dueDate < $1.dueDate }
+    }
+
+    private var filteredLeadershipTodoItems: [ManagerLeadershipTodoItem] {
+        let query = taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return leadershipTodoItems }
+        let normalizedQuery = query.lowercased()
+        return leadershipTodoItems.filter { item in
+            item.title.lowercased().contains(normalizedQuery) ||
+            item.sectionName.lowercased().contains(normalizedQuery)
+        }
     }
 
     private var managerPersonalTodoItems: [ManagerLeadershipTodoItem] {
@@ -448,7 +481,7 @@ struct ManagerHomeView: View {
     private func todoTag(for item: ManagerLeadershipTodoItem) -> String {
         switch item.itemType {
         case .sectionTask:
-            return localized("Section Task", language)
+            return localized("Crew Task", language)
         case .personalTodo:
             return localized("Personal To-Do", language)
         case .managerTodo:
@@ -519,7 +552,7 @@ struct ManagerHomeView: View {
                 NavigationView {
                     Form {
                         Section("New Section") {
-                            TextField("Section name", text: $newSectionName)
+                            TextField("Crew name", text: $newSectionName)
                                 .textInputAutocapitalization(.words)
                         }
 
@@ -546,7 +579,7 @@ struct ManagerHomeView: View {
                 NavigationView {
                     Form {
                         Section("Rename Section") {
-                            TextField("Section name", text: $renameSectionName)
+                            TextField("Crew name", text: $renameSectionName)
                                 .textInputAutocapitalization(.words)
                         }
 
@@ -574,7 +607,7 @@ struct ManagerHomeView: View {
                 NavigationView {
                     Form {
                         Section(localized("Join Section", language)) {
-                            TextField(localized("Section code word", language), text: $joinSectionCode)
+                            TextField(localized("Crew code word", language), text: $joinSectionCode)
                                 .textInputAutocapitalization(.characters)
                                 .autocorrectionDisabled()
                             Text(localized("Enter the section code word from leadership to join their section dashboard.", language))
@@ -781,7 +814,7 @@ struct ManagerHomeView: View {
     }
 
     private var managerEmergencySection: some View {
-        Section(localized("Emergency", language)) {
+        Section {
             Button {
                 sendEmergencyEvacuate()
             } label: {
@@ -812,7 +845,7 @@ struct ManagerHomeView: View {
                             Text(localized("All Managed Members", language))
                                 .font(.headline)
                             Spacer()
-                            Text("\(allManagedSections.count) \(localized("sections", language).lowercased())")
+                            Text("\(allManagedSections.count) \(localized("crews", language).lowercased())")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
@@ -913,66 +946,79 @@ struct ManagerHomeView: View {
     private var managerOverallTodoSection: some View {
         Section {
             DisclosureGroup(isExpanded: $isOverallTodoExpanded) {
-                if leadershipTodoItems.isEmpty {
-                    Text(localized("No leadership to-dos assigned yet.", language))
+                TextField(localized("Search tasks", language), text: $taskSearchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                if filteredLeadershipTodoItems.isEmpty {
+                    Text(taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? localized("No leadership to-dos assigned yet.", language) : localized("No matching tasks.", language))
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(leadershipTodoItems) { item in
-                        HStack(alignment: .top, spacing: 12) {
-                            Button {
-                                toggleOverallTodoCompletion(item)
-                            } label: {
-                                Image(systemName: overallTodoStatusImage(for: item))
-                                    .font(.title3)
-                                    .foregroundStyle(overallTodoStatusColor(for: item))
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.top, 2)
+                    Picker(localized("Task View", language), selection: $overallTodoViewMode) {
+                        ForEach(OverallTodoTimelineView.allCases) { mode in
+                            Text(localized(mode.title, language)).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
 
-                            switch item.itemType {
-                            case .sectionTask:
-                                if let task = overallSectionTask(for: item) {
-                                    NavigationLink {
-                                        WorkerTaskDetailView(
-                                            task: task,
-                                            isCompleted: item.requiresAcknowledgement ? task.doneMemberIDs.contains(item.memberID ?? UUID()) : item.isCompleted,
-                                            isVerified: item.isCompleted,
-                                            privateNote: overallPrivateNote(for: item),
-                                            onToggleCompleted: { isDone in
-                                                toggleOverallTodoCompletion(to: isDone, item: item)
-                                            },
-                                            onSavePrivateNote: { note in
-                                                setOverallPrivateNote(note, for: item)
-                                            }
-                                        )
-                                    } label: {
-                                        overallTodoRowContent(item)
-                                    }
-                                } else {
-                                    overallTodoRowContent(item)
-                                }
-                            case .personalTodo, .managerTodo:
-                                if let todo = overallMemberTodo(for: item) {
-                                    NavigationLink {
-                                        WorkerPersonalTodoDetailView(
-                                            todo: todo,
-                                            privateNote: overallPrivateNote(for: item),
-                                            onToggleCompleted: { isDone in
-                                                toggleOverallTodoCompletion(to: isDone, item: item)
-                                            },
-                                            onSavePrivateNote: { note in
-                                                setOverallPrivateNote(note, for: item)
-                                            }
-                                        )
-                                    } label: {
-                                        overallTodoRowContent(item)
-                                    }
-                                } else {
-                                    overallTodoRowContent(item)
-                                }
+                    switch overallTodoViewMode {
+                    case .month:
+                        EventCalendarView(
+                            selectedDate: $selectedOverallTodoDate,
+                            highlightedDates: filteredLeadershipTodoItems.map(\.dueDate),
+                            language: language
+                        )
+
+                        let dailyItems = overallTodoItems(on: selectedOverallTodoDate)
+                        if dailyItems.isEmpty {
+                            Text(localized("No to-dos on this date.", language))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(dailyItems) { item in
+                                overallTodoNavigationRow(item)
                             }
                         }
-                        .padding(.vertical, 2)
+                    case .week:
+                        DatePicker(
+                            localized("Week Of", language),
+                            selection: $selectedOverallTodoWeekAnchor,
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.compact)
+
+                        let weeklyBuckets = overallTodoItemsForSelectedWeek()
+                        if weeklyBuckets.isEmpty {
+                            Text(localized("No to-dos in this week.", language))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(weeklyBuckets, id: \.date) { bucket in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(overallWeekHeaderString(for: bucket.date))
+                                        .font(.subheadline.weight(.semibold))
+                                    ForEach(bucket.items) { item in
+                                        overallTodoNavigationRow(item)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    case .day:
+                        DatePicker(
+                            localized("Day", language),
+                            selection: $selectedOverallTodoDate,
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.compact)
+
+                        let dailyItems = overallTodoItems(on: selectedOverallTodoDate)
+                        if dailyItems.isEmpty {
+                            Text(localized("No to-dos on this day.", language))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(dailyItems) { item in
+                                overallTodoNavigationRow(item)
+                            }
+                        }
                     }
                 }
             } label: {
@@ -984,9 +1030,9 @@ struct ManagerHomeView: View {
     }
 
     private var managerManagedSectionsSection: some View {
-        Section(localized("Managed Sections", language)) {
+        Section(localized("Managed Crews", language)) {
             if managerSections.isEmpty {
-                Text(localized("No managed sections yet. Tap + to create one.", language))
+                Text(localized("No managed crews yet. Tap + to create one.", language))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach($managerSections) { $section in
@@ -1002,7 +1048,7 @@ struct ManagerHomeView: View {
     private var managerLeadershipSectionsSection: some View {
         Section {
             if leadershipSections.isEmpty {
-                Text(localized("No leadership sections joined yet.", language))
+                Text(localized("No leadership crews joined yet.", language))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(leadershipSections) { section in
@@ -1033,7 +1079,7 @@ struct ManagerHomeView: View {
             }
         } header: {
             HStack {
-                Text(localized("Leadership Sections", language))
+                Text(localized("Leadership Crews", language))
                 Spacer()
                 Button {
                     joinSectionStatusMessage = ""
@@ -1082,7 +1128,7 @@ struct ManagerHomeView: View {
             )
         ) {
             if childSections.isEmpty {
-                Text(localized("No subsections yet.", language))
+                Text(localized("No sub-crews yet.", language))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -1284,9 +1330,22 @@ struct ManagerHomeView: View {
         }
 
         do {
-            try bluetoothManager.writeString("{\"message\":\"emergancy evacuate\"}")
+            let payload: [String: String] = [
+                "type": "emergency",
+                "priority": "critical",
+                "title": "Emergency Evacuate",
+                "message": "Emergency evacuate. Leave the area and follow site evacuation procedures."
+            ]
+
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let json = String(data: data, encoding: .utf8) ?? ""
+
+            try bluetoothManager.writeString(json)
+
             appendEmergencyAlertToManagedSections()
+
             emergencyStatusMessage = "Emergency evacuate sent."
+
         } catch {
             emergencyStatusMessage = "Failed to send emergency evacuate."
         }
@@ -1467,6 +1526,65 @@ struct ManagerHomeView: View {
     }
 
     @ViewBuilder
+    private func overallTodoNavigationRow(_ item: ManagerLeadershipTodoItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                toggleOverallTodoCompletion(item)
+            } label: {
+                Image(systemName: overallTodoStatusImage(for: item))
+                    .font(.title3)
+                    .foregroundStyle(overallTodoStatusColor(for: item))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+
+            switch item.itemType {
+            case .sectionTask:
+                if let task = overallSectionTask(for: item) {
+                    NavigationLink {
+                        WorkerTaskDetailView(
+                            task: task,
+                            isCompleted: item.requiresAcknowledgement ? task.doneMemberIDs.contains(item.memberID ?? UUID()) : item.isCompleted,
+                            isVerified: item.isCompleted,
+                            privateNote: overallPrivateNote(for: item),
+                            onToggleCompleted: { isDone in
+                                toggleOverallTodoCompletion(to: isDone, item: item)
+                            },
+                            onSavePrivateNote: { note in
+                                setOverallPrivateNote(note, for: item)
+                            }
+                        )
+                    } label: {
+                        overallTodoRowContent(item)
+                    }
+                } else {
+                    overallTodoRowContent(item)
+                }
+            case .personalTodo, .managerTodo:
+                if let todo = overallMemberTodo(for: item) {
+                    NavigationLink {
+                        WorkerPersonalTodoDetailView(
+                            todo: todo,
+                            privateNote: overallPrivateNote(for: item),
+                            onToggleCompleted: { isDone in
+                                toggleOverallTodoCompletion(to: isDone, item: item)
+                            },
+                            onSavePrivateNote: { note in
+                                setOverallPrivateNote(note, for: item)
+                            }
+                        )
+                    } label: {
+                        overallTodoRowContent(item)
+                    }
+                } else {
+                    overallTodoRowContent(item)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
     private func overallTodoRowContent(_ item: ManagerLeadershipTodoItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -1494,6 +1612,27 @@ struct ManagerHomeView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func overallTodoItems(on date: Date) -> [ManagerLeadershipTodoItem] {
+        filteredLeadershipTodoItems
+            .filter { Calendar.current.isDate($0.dueDate, inSameDayAs: date) }
+            .sorted { $0.dueDate < $1.dueDate }
+    }
+
+    private func overallTodoItemsForSelectedWeek() -> [(date: Date, items: [ManagerLeadershipTodoItem])] {
+        let start = startOfWeek(for: selectedOverallTodoWeekAnchor)
+        return (0..<7).compactMap { offset in
+            guard let day = Calendar.current.date(byAdding: .day, value: offset, to: start) else { return nil }
+            let dayItems = overallTodoItems(on: day)
+            return dayItems.isEmpty ? nil : (day, dayItems)
+        }
+    }
+
+    private func overallWeekHeaderString(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMM d"
+        return formatter.string(from: date)
     }
 
     private func overallSectionTask(for item: ManagerLeadershipTodoItem) -> SectionTask? {
@@ -1774,7 +1913,7 @@ struct ManagedSectionHostView: View {
         if let sectionBinding {
             sectionDashboardContent(sectionBinding)
         } else {
-            Text(localized("Section not found.", language))
+            Text(localized("Crew not found.", language))
                 .foregroundStyle(.secondary)
         }
     }
@@ -1861,6 +2000,25 @@ struct ManagedSectionHostView: View {
 }
 
 struct ManagerSectionDashboardView: View {
+    private enum SectionTaskTimelineView: String, CaseIterable, Identifiable {
+        case month
+        case week
+        case day
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .month:
+                return "Month"
+            case .week:
+                return "Week"
+            case .day:
+                return "Day"
+            }
+        }
+    }
+
     private struct PendingPersonalTodo: Identifiable {
         let memberID: UUID
         let todoID: UUID
@@ -1868,6 +2026,13 @@ struct ManagerSectionDashboardView: View {
         let todo: MemberTodo
 
         var id: String { "\(memberID.uuidString)-\(todoID.uuidString)" }
+    }
+
+    private struct SectionTaskCalendarDay: Identifiable {
+        let id: String
+        let date: Date?
+        let dayNumber: Int
+        let hasTasks: Bool
     }
 
     @Binding var section: ManagerSection
@@ -1900,7 +2065,10 @@ struct ManagerSectionDashboardView: View {
     @State private var showTaskMediaPicker = false
     @State private var showTaskPDFImporter = false
     @State private var selectedTaskAttachmentType: TaskAttachmentType = .photo
-    @State private var sectionTaskViewMode: TaskTimelineView = .calendar
+    @State private var sectionTaskViewMode: SectionTaskTimelineView = .month
+    @State private var taskSearchText = ""
+    @State private var memberSearchText = ""
+    @State private var assigneeSearchText = ""
     @State private var selectedSectionTaskDate = Date()
     @State private var selectedSectionTaskWeekAnchor = Date()
     @State private var isSectionSnapshotExpanded = true
@@ -1925,6 +2093,42 @@ struct ManagerSectionDashboardView: View {
 
     private var latestSectionAlert: SectionAlert? {
         section.alerts.sorted { $0.createdAt > $1.createdAt }.first
+    }
+
+    private var filteredSectionTasks: [SectionTask] {
+        let query = taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return section.sectionTasks }
+        let normalizedQuery = query.lowercased()
+        return section.sectionTasks.filter { task in
+            task.title.lowercased().contains(normalizedQuery) ||
+            task.descriptionText.lowercased().contains(normalizedQuery) ||
+            task.siteName.lowercased().contains(normalizedQuery) ||
+            task.locationDetails.lowercased().contains(normalizedQuery)
+        }
+    }
+
+    private var filteredMembers: [SectionMember] {
+        let query = memberSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return section.members }
+        let normalizedQuery = query.lowercased()
+        return section.members.filter { member in
+            member.name.lowercased().contains(normalizedQuery) ||
+            managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw).lowercased().contains(normalizedQuery) ||
+            member.roleDisplayTitle.lowercased().contains(normalizedQuery) ||
+            member.phoneNumber.contains(query)
+        }
+    }
+
+    private var filteredAssignableMembers: [SectionMember] {
+        let query = assigneeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return section.members }
+        let normalizedQuery = query.lowercased()
+        return section.members.filter { member in
+            member.name.lowercased().contains(normalizedQuery) ||
+            managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw).lowercased().contains(normalizedQuery) ||
+            member.roleDisplayTitle.lowercased().contains(normalizedQuery) ||
+            member.phoneNumber.contains(query)
+        }
     }
 
     var body: some View {
@@ -2122,7 +2326,7 @@ struct ManagerSectionDashboardView: View {
                 }
                 .padding(.vertical, 4)
             } label: {
-                Text(localized("Section Snapshot", language))
+                Text(localized("Crew Snapshot", language))
             }
         }
         .id(WalkthroughTargetID.sectionSnapshot.rawValue)
@@ -2132,8 +2336,8 @@ struct ManagerSectionDashboardView: View {
     private var subsectionComposer: some View {
         NavigationView {
             Form {
-                Section(localized("New Subsection", language)) {
-                    TextField(localized("Subsection name", language), text: $newSubsectionName)
+                Section(localized("New Sub-crew", language)) {
+                    TextField(localized("Sub-crew name", language), text: $newSubsectionName)
                         .textInputAutocapitalization(.words)
                 }
 
@@ -2149,7 +2353,7 @@ struct ManagerSectionDashboardView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                        Text(member.role.title)
+                                        Text(member.roleDisplayTitle)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -2164,13 +2368,13 @@ struct ManagerSectionDashboardView: View {
                 }
 
                 Section {
-                    Button(localized("Create Subsection", language)) {
+                    Button(localized("Create Sub-crew", language)) {
                         createSubsection()
                     }
                     .disabled(newSubsectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .navigationTitle(localized("Create Subsection", language))
+            .navigationTitle(localized("Create Sub-crew", language))
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(localized("Cancel", language)) {
@@ -2210,7 +2414,7 @@ struct ManagerSectionDashboardView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                        Text(member.role.title)
+                                        Text(member.roleDisplayTitle)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -2345,20 +2549,28 @@ struct ManagerSectionDashboardView: View {
                         Text(localized("No section members available.", language))
                             .foregroundStyle(.secondary)
                     } else {
+                        TextField(localized("Search crew members", language), text: $assigneeSearchText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
                         Button(localized("Add All", language)) {
-                            selectAllAssignees()
+                            selectAllAssignees(filteredAssignableMembers)
                         }
                         .buttonStyle(.bordered)
-                        .disabled(selectedAssigneeIDs.count == section.members.count)
+                        .disabled(filteredAssignableMembers.allSatisfy { selectedAssigneeIDs.contains($0.id) })
 
-                        ForEach(section.members) { member in
+                        if filteredAssignableMembers.isEmpty {
+                            Text(localized("No matching crew members.", language))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(filteredAssignableMembers) { member in
                             Button {
                                 toggleAssignee(member.id)
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                        Text(member.role.title)
+                                        Text(member.roleDisplayTitle)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -2373,6 +2585,7 @@ struct ManagerSectionDashboardView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                        }
                         }
                     }
                 }
@@ -2408,41 +2621,52 @@ struct ManagerSectionDashboardView: View {
                     Text(localized("No crews have joined this section yet.", language))
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach($section.members) { $member in
-                        NavigationLink {
-                            MemberDetailView(
-                                member: $member,
-                                sectionTasks: section.sectionTasks,
-                                onSave: onSave
-                            )
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                        .font(.headline)
-                                    Spacer()
-                                    Text(member.role.title)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                HStack {
-                                    Text(member.phoneNumber)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Label(
-                                        member.isOnSite ? localized("On Site", language) : localized("Off Site", language),
-                                        systemImage: member.isOnSite ? "checkmark.seal.fill" : "xmark.seal"
+                    TextField(localized("Search crew members", language), text: $memberSearchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    if filteredMembers.isEmpty {
+                        Text(localized("No matching crew members.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(filteredMembers) { member in
+                            if let memberBinding = memberBinding(for: member.id) {
+                                NavigationLink {
+                                    MemberDetailView(
+                                        member: memberBinding,
+                                        sectionTasks: section.sectionTasks,
+                                        onSave: onSave
                                     )
-                                    .font(.caption)
-                                    .foregroundStyle(member.isOnSite ? .green : .secondary)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
+                                                .font(.headline)
+                                            Spacer()
+                                            Text(member.roleDisplayTitle)
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        HStack {
+                                            Text(member.phoneNumber)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            Spacer()
+                                            Label(
+                                                member.isOnSite ? localized("On Site", language) : localized("Off Site", language),
+                                                systemImage: member.isOnSite ? "checkmark.seal.fill" : "xmark.seal"
+                                            )
+                                            .font(.caption)
+                                            .foregroundStyle(member.isOnSite ? .green : .secondary)
+                                        }
+                                        Text("\(localized("Crew tasks", language)): \(assignedSectionTaskCount(for: member.id)) • \(localized("Personal to-dos", language)): \(member.todos.count)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        Text("\(localized("Completed", language)): \(completedSectionTaskCount(for: member.id))/\(assignedSectionTaskCount(for: member.id))")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
-                                Text("\(localized("Section tasks", language)): \(assignedSectionTaskCount(for: member.id)) • \(localized("Personal to-dos", language)): \(member.todos.count)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text("\(localized("Completed", language)): \(completedSectionTaskCount(for: member.id))/\(assignedSectionTaskCount(for: member.id))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -2459,7 +2683,7 @@ struct ManagerSectionDashboardView: View {
         Section {
             DisclosureGroup(isExpanded: $areSubsectionsExpanded) {
                 if subsections.isEmpty {
-                    Text(localized("No subsections yet.", language))
+                    Text(localized("No sub-crews yet.", language))
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(subsections) { subsection in
@@ -2483,11 +2707,11 @@ struct ManagerSectionDashboardView: View {
                     }
                 }
             } label: {
-                Text(localized("Show Subsections", language))
+                Text(localized("Show Sub-crews", language))
             }
         } header: {
             HStack {
-                Text(localized("Subsections", language))
+                Text(localized("Sub-crews", language))
                 Spacer()
                 Button {
                     newSubsectionName = ""
@@ -2558,26 +2782,26 @@ struct ManagerSectionDashboardView: View {
 
     private var sectionTasksSection: some View {
         Section {
-            if section.sectionTasks.isEmpty {
-                Text(localized("No section tasks yet.", language))
+            TextField(localized("Search tasks", language), text: $taskSearchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if filteredSectionTasks.isEmpty {
+                Text(taskSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? localized("No section tasks yet.", language) : localized("No matching tasks.", language))
                     .foregroundStyle(.secondary)
             } else {
                 Picker(localized("Task View", language), selection: $sectionTaskViewMode) {
-                    ForEach(TaskTimelineView.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                    ForEach(SectionTaskTimelineView.allCases) { mode in
+                        Text(localized(mode.title, language)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                if sectionTaskViewMode == .calendar {
-                    DatePicker(
-                        localized("Calendar", language),
-                        selection: $selectedSectionTaskDate,
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .id(WalkthroughTargetID.sectionTasks.rawValue)
-                    .walkthroughTarget(.sectionTasks)
+                switch sectionTaskViewMode {
+                case .month:
+                    sectionTaskCalendarView
+                        .id(WalkthroughTargetID.sectionTasks.rawValue)
+                        .walkthroughTarget(.sectionTasks)
 
                     let dailyTasks = sectionTasks(on: selectedSectionTaskDate)
                     if dailyTasks.isEmpty {
@@ -2588,7 +2812,7 @@ struct ManagerSectionDashboardView: View {
                             managerTaskNavigationRow(task)
                         }
                     }
-                } else {
+                case .week:
                     DatePicker(
                         localized("Week Of", language),
                         selection: $selectedSectionTaskWeekAnchor,
@@ -2612,11 +2836,28 @@ struct ManagerSectionDashboardView: View {
                             .padding(.vertical, 2)
                         }
                     }
+                case .day:
+                    DatePicker(
+                        localized("Day", language),
+                        selection: $selectedSectionTaskDate,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.compact)
+
+                    let dailyTasks = sectionTasks(on: selectedSectionTaskDate)
+                    if dailyTasks.isEmpty {
+                        Text(localized("No tasks on this day.", language))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(dailyTasks) { task in
+                            managerTaskNavigationRow(task)
+                        }
+                    }
                 }
             }
         } header: {
             HStack {
-                Text(localized("Section Tasks", language))
+                Text(localized("Crew Tasks", language))
                 Spacer()
                 Button {
                     showAssignTaskSheet = true
@@ -2627,6 +2868,84 @@ struct ManagerSectionDashboardView: View {
                 .id(WalkthroughTargetID.sectionTaskAddButton.rawValue)
                 .walkthroughTarget(.sectionTaskAddButton)
             }
+        }
+    }
+
+    private var sectionTaskCalendarView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button {
+                    shiftSelectedSectionTaskMonth(by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Text(sectionTaskMonthTitle)
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    shiftSelectedSectionTaskMonth(by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(sectionTaskWeekdayHeaders, id: \.self) { weekday in
+                    Text(weekday)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            VStack(spacing: 10) {
+                ForEach(Array(sectionTaskCalendarWeeks.enumerated()), id: \.offset) { _, week in
+                    HStack(spacing: 8) {
+                        ForEach(week) { day in
+                            if let date = day.date {
+                                Button {
+                                    selectedSectionTaskDate = date
+                                } label: {
+                                    VStack(spacing: 4) {
+                                        Text("\(day.dayNumber)")
+                                            .font(.subheadline.weight(Calendar.current.isDate(date, inSameDayAs: selectedSectionTaskDate) ? .bold : .regular))
+                                            .frame(maxWidth: .infinity)
+                                        Circle()
+                                            .fill(day.hasTasks ? Color.arcAccentOrange : Color.clear)
+                                            .frame(width: 6, height: 6)
+                                    }
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(Calendar.current.isDate(date, inSameDayAs: selectedSectionTaskDate) ? Color.arcAccentOrange.opacity(0.16) : Color.clear)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                Color.clear
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 34)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var sectionTaskCalendarWeeks: [[SectionTaskCalendarDay]] {
+        let days = sectionTaskCalendarDays
+        return stride(from: 0, to: days.count, by: 7).map { startIndex in
+            Array(days[startIndex..<min(startIndex + 7, days.count)])
         }
     }
 
@@ -2708,8 +3027,9 @@ struct ManagerSectionDashboardView: View {
         selectedGroupChatMemberIDs = Set(section.members.map(\.id))
     }
 
-    private func selectAllAssignees() {
-        selectedAssigneeIDs = Set(section.members.map(\.id))
+    private func selectAllAssignees(_ members: [SectionMember]? = nil) {
+        let membersToSelect = members ?? section.members
+        selectedAssigneeIDs.formUnion(membersToSelect.map(\.id))
     }
 
     private func toggleSubsectionMember(_ memberID: UUID) {
@@ -2826,8 +3146,20 @@ struct ManagerSectionDashboardView: View {
         }
 
         do {
-            try bluetoothManager.writeString("{\"message\":\"break time\"}")
+            let payload: [String: String] = [
+                "type": "break_time",
+                "priority": "medium",
+                "title": "Break Time",
+                "message": "Break time. Pause work and follow section break procedures."
+            ]
+
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let json = String(data: data, encoding: .utf8) ?? ""
+
+            try bluetoothManager.writeString(json)
+
             breakStatusMessage = "Break time sent."
+
         } catch {
             breakStatusMessage = "Failed to send break time."
         }
@@ -2886,9 +3218,74 @@ struct ManagerSectionDashboardView: View {
     }
 
     private func sectionTasks(on date: Date) -> [SectionTask] {
-        section.sectionTasks
+        filteredSectionTasks
             .filter { Calendar.current.isDate($0.dueDate, inSameDayAs: date) }
             .sorted { $0.dueDate < $1.dueDate }
+    }
+
+    private var sectionTaskMonthTitle: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: startOfMonth(for: selectedSectionTaskDate))
+    }
+
+    private var sectionTaskWeekdayHeaders: [String] {
+        let formatter = DateFormatter()
+        return formatter.shortStandaloneWeekdaySymbols
+    }
+
+    private var sectionTaskDates: Set<Date> {
+        let calendar = Calendar.current
+        return Set(filteredSectionTasks.map { calendar.startOfDay(for: $0.dueDate) })
+    }
+
+    private var sectionTaskCalendarDays: [SectionTaskCalendarDay] {
+        let calendar = Calendar.current
+        let monthStart = startOfMonth(for: selectedSectionTaskDate)
+        let range = calendar.range(of: .day, in: .month, for: monthStart) ?? 1..<2
+        let firstWeekdayIndex = calendar.component(.weekday, from: monthStart) - calendar.firstWeekday
+        let leadingEmptyDays = (firstWeekdayIndex + 7) % 7
+        var days: [SectionTaskCalendarDay] = (0..<leadingEmptyDays).map { index in
+            SectionTaskCalendarDay(id: "empty-\(index)", date: nil, dayNumber: 0, hasTasks: false)
+        }
+
+        for day in range {
+            guard let date = calendar.date(byAdding: .day, value: day - 1, to: monthStart) else { continue }
+            days.append(
+                SectionTaskCalendarDay(
+                    id: "day-\(day)",
+                    date: date,
+                    dayNumber: day,
+                    hasTasks: sectionTaskDates.contains(calendar.startOfDay(for: date))
+                )
+            )
+        }
+
+        while days.count % 7 != 0 {
+            days.append(
+                SectionTaskCalendarDay(
+                    id: "trailing-empty-\(days.count)",
+                    date: nil,
+                    dayNumber: 0,
+                    hasTasks: false
+                )
+            )
+        }
+
+        return days
+    }
+
+    private func startOfMonth(for date: Date) -> Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? date
+    }
+
+    private func shiftSelectedSectionTaskMonth(by offset: Int) {
+        guard let shiftedDate = Calendar.current.date(byAdding: .month, value: offset, to: startOfMonth(for: selectedSectionTaskDate)) else {
+            return
+        }
+        selectedSectionTaskDate = shiftedDate
     }
 
     private func sectionTasksForSelectedWeek() -> [(date: Date, tasks: [SectionTask])] {
@@ -2901,7 +3298,7 @@ struct ManagerSectionDashboardView: View {
     }
 
     private var tasksAwaitingVerification: [SectionTask] {
-        section.sectionTasks.filter { task in
+        filteredSectionTasks.filter { task in
             task.requiresAcknowledgement && task.doneMemberIDs.contains(where: { !task.verifiedMemberIDs.contains($0) })
         }
     }
@@ -2994,6 +3391,11 @@ struct ManagerSectionDashboardView: View {
         return $section.sectionTasks[index]
     }
 
+    private func memberBinding(for memberID: UUID) -> Binding<SectionMember>? {
+        guard let index = section.members.firstIndex(where: { $0.id == memberID }) else { return nil }
+        return $section.members[index]
+    }
+
     private func groupChatBinding(for chatID: UUID) -> Binding<SectionGroupChat>? {
         guard let index = section.groupChats.firstIndex(where: { $0.id == chatID }) else { return nil }
         return $section.groupChats[index]
@@ -3027,7 +3429,7 @@ struct ManagerSectionDashboardView: View {
         case .sectionTasks(let sectionID) where sectionID == section.id:
             areSubsectionsExpanded = false
             areMembersExpanded = false
-            sectionTaskViewMode = .calendar
+            sectionTaskViewMode = .month
             showSectionSettingsSheet = false
             walkthroughMemberID = nil
             showAssignTaskSheet = false
@@ -3268,11 +3670,11 @@ struct SectionSettingsView: View {
 
     var body: some View {
         Form {
-            Section(localized("Section Details", language)) {
-                TextField(localized("Section name", language), text: $sectionNameDraft)
+            Section(localized("Crew Details", language)) {
+                TextField(localized("Crew name", language), text: $sectionNameDraft)
                     .textInputAutocapitalization(.words)
 
-                TextField(localized("Section code word", language), text: $codeWordDraft)
+                TextField(localized("Crew code word", language), text: $codeWordDraft)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
 
@@ -3389,7 +3791,7 @@ struct SectionSettingsView: View {
                 }
             }
 
-            Section(localized("Section Features", language)) {
+            Section(localized("Crew Features", language)) {
                 Toggle(localized("Enable Time Clock", language), isOn: featureBinding(\.timeClockEnabled))
                 Toggle(localized("Enable Group Chats", language), isOn: featureBinding(\.groupChatsEnabled))
                 Toggle(localized("Enable Section Tasks", language), isOn: featureBinding(\.sectionTasksEnabled))
@@ -3401,7 +3803,7 @@ struct SectionSettingsView: View {
             sectionNameDraft = section.name
             codeWordDraft = section.codeWord
         }
-        .navigationTitle(localized("Section Settings", language))
+        .navigationTitle(localized("Crew Settings", language))
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(localized("Done", language)) {
@@ -3465,7 +3867,7 @@ struct SectionSettingsView: View {
                     accountID: profile.accountID,
                     name: profile.name,
                     phoneNumber: profile.phoneNumber,
-                    role: profile.role == .manager ? .foreman : .worker,
+                    role: profile.role == .manager ? .foreman : .journeyman,
                     isOnSite: false
                 )
             )
@@ -3492,7 +3894,7 @@ struct SectionSettingsView: View {
         section.codeWord = normalizedCode
         sectionNameDraft = cleanedName
         codeWordDraft = normalizedCode
-        sectionIdentityStatusMessage = localized("Section details saved.", language)
+        sectionIdentityStatusMessage = localized("Crew details saved.", language)
         onSave()
     }
 
@@ -3624,7 +4026,7 @@ struct ManagerSectionTaskDetailView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                Text(member.role.title)
+                                Text(member.roleDisplayTitle)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -4054,7 +4456,7 @@ struct GroupChatSettingsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(managerVisibleName(member, nicknamesRaw: managerCrewNicknamesRaw))
-                                Text(member.role.title)
+                                Text(member.roleDisplayTitle)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -4453,7 +4855,18 @@ struct MemberDetailView: View {
                     }
                 }
                 .onChange(of: member.role) { _ in
+                    if member.role != .other {
+                        member.customRoleTitle = ""
+                    }
                     onSave()
+                }
+
+                if member.role == .other {
+                    TextField(localized("Custom Role", language), text: $member.customRoleTitle)
+                        .textInputAutocapitalization(.words)
+                        .onChange(of: member.customRoleTitle) { _ in
+                            onSave()
+                        }
                 }
 
                 Toggle(localized("On Site", language), isOn: $member.isOnSite)

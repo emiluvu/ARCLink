@@ -198,7 +198,7 @@ struct ContentView: View {
                 forKey: "managerSectionsJSON"
             )
             demoAppStorage.set(managerAssignedSectionCodesRaw, forKey: "managerAssignedSectionCodesJSON")
-            demoAppStorage.set(managerPersonalTodosRaw, forKey: "managerPersonalTodosJSON")
+            demoAppStorage.set(encodeMemberTodos(defaultManagerDemoPersonalTodos()), forKey: "managerPersonalTodosJSON")
             demoAppStorage.set(managerCrewNicknamesRaw, forKey: "managerCrewNicknamesJSON")
             demoAppStorage.set(workerPrivateTaskNotesRaw, forKey: "workerPrivateTaskNotesJSON")
         }
@@ -329,6 +329,7 @@ private struct DemoModeContainerView: View {
     @State private var isManagerWalkthroughSettling = false
     @State private var managerWalkthroughDestination: DemoDestination = .home
     @State private var isDemoControlExpanded = false
+    @State private var showFieldwireDemo = false
 
     private var language: AppLanguage {
         AppLanguage(rawValue: profileLanguageRawValue) ?? .english
@@ -386,8 +387,8 @@ private struct DemoModeContainerView: View {
                 id: 5,
                 destination: .home,
                 targetID: .managedSectionCard,
-                title: localized("Section Management", language),
-                message: localized("Managed Sections is the main Crew Lead control area for opening sections, reviewing status, and organizing work by crew or site.", language)
+                title: localized("Crew Management", language),
+                message: localized("Managed Crews is the main Crew Lead control area for opening crews, reviewing status, and organizing work by crew or site.", language)
             ),
             WalkthroughStep(
                 id: 6,
@@ -400,8 +401,8 @@ private struct DemoModeContainerView: View {
                 id: 7,
                 destination: primarySectionDetail,
                 targetID: .sectionSnapshot,
-                title: localized("Section Snapshot", language),
-                message: localized("Inside each section, the snapshot shows member count, on-site status, due-today work, verification load, and progress bars for each person.", language)
+                title: localized("Crew Snapshot", language),
+                message: localized("Inside each crew, the snapshot shows member count, on-site status, due-today work, verification load, and progress bars for each person.", language)
             ),
             WalkthroughStep(
                 id: 8,
@@ -414,8 +415,8 @@ private struct DemoModeContainerView: View {
                 id: 9,
                 destination: primarySectionDetail,
                 targetID: .sectionFeatureControls,
-                title: localized("Section Feature Controls", language),
-                message: localized("The section controls let Crew Leads manage which tools are active, including time clock, group chats, section tasks, and personal to-dos.", language)
+                title: localized("Crew Feature Controls", language),
+                message: localized("The crew controls let Crew Leads manage which tools are active, including time clock, group chats, crew tasks, and personal to-dos.", language)
             ),
             WalkthroughStep(
                 id: 10,
@@ -428,15 +429,15 @@ private struct DemoModeContainerView: View {
                 id: 11,
                 destination: primarySectionDetail,
                 targetID: .sectionSubsections,
-                title: localized("Subsection Management", language),
-                message: localized("Open the subsection area inside the section to organize smaller crews, zones, or phases under the main section.", language)
+                title: localized("Sub-crew Management", language),
+                message: localized("Open the sub-crew area inside the crew to organize smaller crews, zones, or phases under the main crew.", language)
             ),
             WalkthroughStep(
                 id: 12,
                 destination: primarySectionChats,
                 targetID: .sectionChats,
                 title: localized("Group Chats and Pinned Messages", language),
-                message: localized("Section chats keep crews aligned with pinned updates, media sharing, reactions, and message visibility controls.", language)
+                message: localized("Crew chats keep crews aligned with pinned updates, media sharing, reactions, and message visibility controls.", language)
             ),
             WalkthroughStep(
                 id: 13,
@@ -449,7 +450,7 @@ private struct DemoModeContainerView: View {
                 id: 14,
                 destination: primarySectionTasks,
                 targetID: .sectionTaskAddButton,
-                title: localized("Section Task Creation", language),
+                title: localized("Crew Task Creation", language),
                 message: localized("Crew Leads create section tasks here with assignees, due dates, priorities, checklists, and attachments.", language)
             ),
             WalkthroughStep(
@@ -521,6 +522,12 @@ private struct DemoModeContainerView: View {
                 .padding(.trailing, 12)
                 .padding(.bottom, 12)
         }
+        .sheet(isPresented: $showFieldwireDemo) {
+            NavigationView {
+                FieldwireDemoSandboxView()
+            }
+            .navigationViewStyle(.stack)
+        }
         .onAppear {
             managerSectionsRaw = encodeSections(mergedSectionsWithDemoSection(from: managerSectionsRaw))
             guard !hasHandledInitialWalkthrough else { return }
@@ -553,7 +560,7 @@ private struct DemoModeContainerView: View {
                     Text("Demo")
                         .font(.caption.weight(.semibold))
                     if isDemoControlExpanded {
-                        Text(activeRole == .manager ? localized("Crew Lead", language) : localized("Crew", language))
+                        Text(activeRole == .manager ? localized("Crew Lead", language) : localized("Crew Member", language))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -589,9 +596,16 @@ private struct DemoModeContainerView: View {
                     )
                 ) {
                     Text(localized("Crew Lead", language)).tag(AppRole.manager)
-                    Text(localized("Crew", language)).tag(AppRole.worker)
+                    Text(localized("Crew Member", language)).tag(AppRole.worker)
                 }
                 .pickerStyle(.segmented)
+                .transition(.move(edge: .top).combined(with: .opacity))
+
+                Button("Fieldwire Demo") {
+                    showFieldwireDemo = true
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
                 .transition(.move(edge: .top).combined(with: .opacity))
 
                 if activeRole == .manager {
@@ -650,6 +664,317 @@ private struct DemoModeContainerView: View {
             return nil
         }
         return geometryProxy[anchor]
+    }
+}
+
+private struct FieldwireDemoSandboxView: View {
+    private enum SandboxPanel: String, CaseIterable, Identifiable {
+        case overview
+        case importPreview
+        case mapping
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .overview:
+                return "Overview"
+            case .importPreview:
+                return "Import Preview"
+            case .mapping:
+                return "ARCLink Mapping"
+            }
+        }
+    }
+
+    private struct FieldwireProject: Identifiable, Hashable {
+        let id = UUID()
+        let name: String
+        let region: String
+        let crewName: String
+        let status: String
+        let tasks: [FieldwireTask]
+    }
+
+    private struct FieldwireTask: Identifiable, Hashable {
+        let id = UUID()
+        let title: String
+        let assignee: String
+        let dueLabel: String
+        let location: String
+        let priority: String
+        let checklistCount: Int
+    }
+
+    private struct ARCLinkMappedTask: Identifiable {
+        let id = UUID()
+        let title: String
+        let destinationCrew: String
+        let assigneeMatch: String
+        let notes: String
+    }
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedPanel: SandboxPanel = .overview
+    @State private var selectedProjectID: UUID?
+    @State private var hasLoadedSampleImport = false
+    @State private var lastSandboxSync: Date?
+
+    private let sampleProjects: [FieldwireProject] = [
+        FieldwireProject(
+            name: "Tower A Podium Concrete",
+            region: "US",
+            crewName: "Concrete Crew",
+            status: "Ready for sandbox import",
+            tasks: [
+                FieldwireTask(
+                    title: "Confirm pump truck access route",
+                    assignee: "Maya Chen",
+                    dueLabel: "Today 8:30 AM",
+                    location: "South gate staging",
+                    priority: "Medium",
+                    checklistCount: 3
+                ),
+                FieldwireTask(
+                    title: "Finalize slab prep for afternoon pour",
+                    assignee: "Luis Martinez",
+                    dueLabel: "Tomorrow 3:30 PM",
+                    location: "Deck 2 west bay",
+                    priority: "High",
+                    checklistCount: 5
+                ),
+                FieldwireTask(
+                    title: "Review barricade placement before pour",
+                    assignee: "Arjun Patel",
+                    dueLabel: "Today 12:00 PM",
+                    location: "Podium edge protection",
+                    priority: "High",
+                    checklistCount: 2
+                )
+            ]
+        ),
+        FieldwireProject(
+            name: "Steel Erection Phase 3",
+            region: "US",
+            crewName: "Structural Crew",
+            status: "Ready for sandbox import",
+            tasks: [
+                FieldwireTask(
+                    title: "Coordinate crane window and delivery lane",
+                    assignee: "Dana Brooks",
+                    dueLabel: "Today 10:00 AM",
+                    location: "Laydown yard",
+                    priority: "High",
+                    checklistCount: 4
+                ),
+                FieldwireTask(
+                    title: "Review afternoon hoisting permit updates",
+                    assignee: "Jordan Kim",
+                    dueLabel: "Today 4:00 PM",
+                    location: "North tower pick zone",
+                    priority: "Medium",
+                    checklistCount: 1
+                )
+            ]
+        )
+    ]
+
+    private var selectedProject: FieldwireProject? {
+        if let selectedProjectID {
+            return sampleProjects.first(where: { $0.id == selectedProjectID })
+        }
+        return sampleProjects.first
+    }
+
+    private var mappedTasks: [ARCLinkMappedTask] {
+        guard let selectedProject else { return [] }
+        return selectedProject.tasks.map { task in
+            ARCLinkMappedTask(
+                title: task.title,
+                destinationCrew: selectedProject.crewName,
+                assigneeMatch: task.assignee,
+                notes: "\(task.location) • \(task.priority) priority • \(task.checklistCount) checklist items"
+            )
+        }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Fieldwire Demo Sandbox")
+                        .font(.title3.weight(.semibold))
+                    Text("This page is isolated from the rest of ARCLink. It only previews how a read-only Fieldwire import could flow into ARCLink crews and tasks.")
+                        .foregroundStyle(.secondary)
+                    Text("No live API calls. No data is written into ARCLink storage.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("Sandbox View") {
+                Picker("Sandbox View", selection: $selectedPanel) {
+                    ForEach(SandboxPanel.allCases) { panel in
+                        Text(panel.title).tag(panel)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            switch selectedPanel {
+            case .overview:
+                overviewSection
+            case .importPreview:
+                importPreviewSection
+            case .mapping:
+                mappingSection
+            }
+        }
+        .navigationTitle("Fieldwire Demo")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+        }
+        .onAppear {
+            selectedProjectID = selectedProjectID ?? sampleProjects.first?.id
+        }
+    }
+
+    @ViewBuilder
+    private var overviewSection: some View {
+        Section("Connection Model") {
+            labeledValueRow(title: "Mode", value: "Read-only sandbox")
+            labeledValueRow(title: "Auth", value: "Refresh token -> access token")
+            labeledValueRow(title: "Region handling", value: "US / EU project routing")
+            labeledValueRow(title: "Recommended first step", value: "Project + task import only")
+            labeledValueRow(title: "Source of truth", value: "Fieldwire project data, ARCLink crew operations")
+        }
+
+        Section("Why Start Here") {
+            Text("This isolates the riskiest part of the integration: project and task intake.")
+            Text("It avoids two-way sync conflicts while proving the value of bringing Fieldwire tasks into ARCLink crew workflows.")
+        }
+
+        Section("Next Build Steps") {
+            Text("1. Add Fieldwire connection settings: region, tokens, selected projects.")
+            Text("2. Fetch projects and tasks into a sync service outside the SwiftUI views.")
+            Text("3. Map imported tasks into ARCLink crew tasks using crew name and assignee matching.")
+            Text("4. Keep write-back disabled until source-of-truth rules are settled.")
+        }
+    }
+
+    @ViewBuilder
+    private var importPreviewSection: some View {
+        Section("Sandbox Controls") {
+            Picker("Sample Project", selection: Binding(
+                get: { selectedProject?.id ?? sampleProjects.first?.id ?? UUID() },
+                set: { selectedProjectID = $0 }
+            )) {
+                ForEach(sampleProjects) { project in
+                    Text(project.name).tag(project.id)
+                }
+            }
+
+            Button(hasLoadedSampleImport ? "Run Sample Import Again" : "Run Sample Import") {
+                hasLoadedSampleImport = true
+                lastSandboxSync = Date()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.arcAccentOrange)
+
+            if let lastSandboxSync {
+                Text("Last sandbox import: \(lastSandboxSync.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if let selectedProject {
+            Section("Imported Project") {
+                labeledValueRow(title: "Project", value: selectedProject.name)
+                labeledValueRow(title: "Mapped Crew", value: selectedProject.crewName)
+                labeledValueRow(title: "Region", value: selectedProject.region)
+                labeledValueRow(title: "Status", value: selectedProject.status)
+                labeledValueRow(title: "Tasks", value: "\(selectedProject.tasks.count)")
+            }
+
+            Section("Fieldwire Tasks") {
+                ForEach(selectedProject.tasks) { task in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(task.title)
+                                .font(.headline)
+                            Spacer()
+                            Text(task.priority)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.arcAccentOrange.opacity(0.12), in: Capsule())
+                        }
+                        Text("Assignee: \(task.assignee)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Due: \(task.dueLabel)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Location: \(task.location)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mappingSection: some View {
+        if !hasLoadedSampleImport {
+            Section {
+                Text("Run the sample import first to preview how Fieldwire tasks would map into ARCLink.")
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Section("ARCLink Mapping Preview") {
+                ForEach(mappedTasks) { task in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(task.title)
+                            .font(.headline)
+                        Text("Destination crew: \(task.destinationCrew)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Assignee match: \(task.assigneeMatch)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(task.notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            Section("Recommended Production Rules") {
+                Text("Only import Fieldwire tasks into ARCLink after a project-to-crew mapping is explicitly approved.")
+                Text("Match assignees by email, phone number, or stored external user ID before assigning imported work.")
+                Text("Keep comments, forms, and photos read-only until conflict rules are defined.")
+            }
+        }
+    }
+
+    private func labeledValueRow(title: String, value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
     }
 }
 

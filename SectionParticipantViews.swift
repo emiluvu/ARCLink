@@ -286,7 +286,7 @@ struct ManagerAssignedSectionDashboardView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle(currentSection?.name ?? localized("Leadership Sections", language))
+        .navigationTitle(currentSection?.name ?? localized("Leadership Crews", language))
         .listStyle(.insetGrouped)
     }
 

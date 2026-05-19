@@ -16,7 +16,7 @@ enum AppRole: String, CaseIterable, Identifiable, Codable {
         case .manager:
             return "Crew Lead"
         case .worker:
-            return "Crew"
+            return "Crew Member"
         }
     }
 }
@@ -222,6 +222,7 @@ struct SectionMember: Identifiable, Codable {
     var name: String
     var phoneNumber: String
     var role: MemberRole
+    var customRoleTitle: String
     var isOnSite: Bool
     var clockInTime: Date?
     var clockOutTime: Date?
@@ -232,7 +233,8 @@ struct SectionMember: Identifiable, Codable {
         accountID: String? = nil,
         name: String,
         phoneNumber: String,
-        role: MemberRole = .worker,
+        role: MemberRole = .journeyman,
+        customRoleTitle: String = "",
         isOnSite: Bool = false,
         clockInTime: Date? = nil,
         clockOutTime: Date? = nil,
@@ -243,10 +245,19 @@ struct SectionMember: Identifiable, Codable {
         self.name = name
         self.phoneNumber = phoneNumber
         self.role = role
+        self.customRoleTitle = customRoleTitle
         self.isOnSite = isOnSite
         self.clockInTime = clockInTime
         self.clockOutTime = clockOutTime
         self.todos = todos
+    }
+
+    var roleDisplayTitle: String {
+        if role == .other {
+            let trimmedTitle = customRoleTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmedTitle.isEmpty ? role.title : trimmedTitle
+        }
+        return role.title
     }
 
     enum CodingKeys: String, CodingKey {
@@ -255,6 +266,7 @@ struct SectionMember: Identifiable, Codable {
         case name
         case phoneNumber
         case role
+        case customRoleTitle
         case isOnSite
         case clockInTime
         case clockOutTime
@@ -267,7 +279,8 @@ struct SectionMember: Identifiable, Codable {
         accountID = try container.decodeIfPresent(String.self, forKey: .accountID)
         name = try container.decode(String.self, forKey: .name)
         phoneNumber = try container.decode(String.self, forKey: .phoneNumber)
-        role = try container.decodeIfPresent(MemberRole.self, forKey: .role) ?? .worker
+        role = try container.decodeIfPresent(MemberRole.self, forKey: .role) ?? .journeyman
+        customRoleTitle = try container.decodeIfPresent(String.self, forKey: .customRoleTitle) ?? ""
         isOnSite = try container.decodeIfPresent(Bool.self, forKey: .isOnSite) ?? false
         clockInTime = try container.decodeIfPresent(Date.self, forKey: .clockInTime)
         clockOutTime = try container.decodeIfPresent(Date.self, forKey: .clockOutTime)
@@ -650,23 +663,65 @@ enum TaskPriority: String, CaseIterable, Codable, Identifiable {
 }
 
 enum MemberRole: String, CaseIterable, Codable, Identifiable {
-    case worker
-    case lead
+    case apprentice
     case foreman
+    case journeyman
+    case projectEngineer
+    case projectManager
     case safety
+    case superintendent
+    case other
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .worker:
-            return "Crew"
-        case .lead:
-            return "Lead"
+        case .apprentice:
+            return "Apprentice"
         case .foreman:
             return "Foreman"
+        case .journeyman:
+            return "Journeyman"
+        case .other:
+            return "Other"
+        case .projectEngineer:
+            return "Project Engineer"
+        case .projectManager:
+            return "Project Manager"
         case .safety:
             return "Safety"
+        case .superintendent:
+            return "Superintendent"
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+
+        switch rawValue {
+        case Self.apprentice.rawValue:
+            self = .apprentice
+        case Self.foreman.rawValue:
+            self = .foreman
+        case Self.journeyman.rawValue:
+            self = .journeyman
+        case Self.other.rawValue:
+            self = .other
+        case Self.projectEngineer.rawValue:
+            self = .projectEngineer
+        case Self.projectManager.rawValue:
+            self = .projectManager
+        case Self.safety.rawValue:
+            self = .safety
+        case Self.superintendent.rawValue:
+            self = .superintendent
+        case "worker":
+            self = .journeyman
+        case "lead":
+            self = .superintendent
+        default:
+            self = .other
         }
     }
 }

@@ -743,6 +743,13 @@ func encodeSections(_ sections: [ManagerSection]) -> String {
 }
 
 func defaultDemoSections() -> [ManagerSection] {
+    let calendar = Calendar.current
+    let now = Date()
+    let morningCheck = calendar.date(bySettingHour: 8, minute: 30, second: 0, of: now) ?? now
+    let middayCheck = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: now) ?? now
+    let afternoonCheck = calendar.date(bySettingHour: 15, minute: 30, second: 0, of: now) ?? now
+    let tomorrowMorning = calendar.date(byAdding: .day, value: 1, to: morningCheck) ?? now
+    let tomorrowAfternoon = calendar.date(byAdding: .day, value: 1, to: afternoonCheck) ?? now
     let parentSectionID = UUID()
     let foreman = SectionMember(
         accountID: "200001",
@@ -751,8 +758,8 @@ func defaultDemoSections() -> [ManagerSection] {
         role: .foreman,
         isOnSite: true,
         todos: [
-            MemberTodo(title: "Approve morning concrete pour checklist", dueDate: Date()),
-            MemberTodo(title: "Review rebar delivery log", dueDate: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date())
+            MemberTodo(title: "Approve morning concrete pour checklist", dueDate: morningCheck),
+            MemberTodo(title: "Review rebar delivery log", dueDate: tomorrowMorning)
         ]
     )
     let safetyLead = SectionMember(
@@ -761,13 +768,13 @@ func defaultDemoSections() -> [ManagerSection] {
         role: .safety,
         isOnSite: true,
         todos: [
-            MemberTodo(title: "Run 2PM harness inspection", dueDate: Date())
+            MemberTodo(title: "Run 2PM harness inspection", dueDate: afternoonCheck)
         ]
     )
     let crewLead = SectionMember(
         name: "Arjun Patel",
         phoneNumber: "4155552077",
-        role: .lead,
+        role: .superintendent,
         isOnSite: false
     )
 
@@ -799,7 +806,7 @@ func defaultDemoSections() -> [ManagerSection] {
             SectionTask(
                 title: "Finalize slab prep for afternoon pour",
                 priority: .high,
-                dueDate: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date(),
+                dueDate: tomorrowAfternoon,
                 assigneeIDs: [foreman.id, safetyLead.id],
                 managerNotes: "Confirm rebar spacing and send photo update before 2 PM.",
                 doneMemberIDs: [foreman.id],
@@ -822,6 +829,15 @@ func defaultDemoSections() -> [ManagerSection] {
                 managerNotes: "Mark this done after you physically confirm the barricades. Crew Lead will verify final completion.",
                 doneMemberIDs: [foreman.id],
                 verifiedMemberIDs: []
+            ),
+            SectionTask(
+                title: "Confirm pump truck access route",
+                priority: .medium,
+                dueDate: morningCheck,
+                siteName: "Tower A - Concrete",
+                locationDetails: "South gate staging",
+                assigneeIDs: [safetyLead.id],
+                managerNotes: "Verify the truck route is clear before the first concrete convoy arrives."
             )
         ]
     )
@@ -849,9 +865,16 @@ func defaultDemoSections() -> [ManagerSection] {
             SectionTask(
                 title: "Mark deck embed locations",
                 priority: .medium,
-                dueDate: Date(),
+                dueDate: middayCheck,
                 assigneeIDs: [foreman.id, crewLead.id],
                 managerNotes: "Complete before concrete inspection at noon."
+            ),
+            SectionTask(
+                title: "Stage edge protection materials",
+                priority: .high,
+                dueDate: tomorrowMorning,
+                assigneeIDs: [crewLead.id],
+                managerNotes: "Move rails and toe boards to the east deck before the morning briefing."
             )
         ]
     )
@@ -859,7 +882,38 @@ func defaultDemoSections() -> [ManagerSection] {
     return [parentSection, demoSubsection]
 }
 
+func defaultManagerDemoPersonalTodos() -> [MemberTodo] {
+    let calendar = Calendar.current
+    let now = Date()
+    let morning = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now
+    let lunch = calendar.date(bySettingHour: 12, minute: 30, second: 0, of: now) ?? now
+    let tomorrowMorning = calendar.date(byAdding: .day, value: 1, to: morning) ?? now
+
+    return [
+        MemberTodo(
+            title: "Review daily production plan with foremen",
+            dueDate: morning,
+            priority: .high
+        ),
+        MemberTodo(
+            title: "Confirm lunch break coverage across crews",
+            dueDate: lunch,
+            priority: .medium
+        ),
+        MemberTodo(
+            title: "Prepare tomorrow's manpower adjustments",
+            dueDate: tomorrowMorning,
+            priority: .medium
+        )
+    ]
+}
+
 func defaultLeadershipDemoSection() -> ManagerSection {
+    let calendar = Calendar.current
+    let now = Date()
+    let midMorning = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: now) ?? now
+    let lateAfternoon = calendar.date(bySettingHour: 16, minute: 0, second: 0, of: now) ?? now
+    let tomorrowMorning = calendar.date(byAdding: .day, value: 1, to: midMorning) ?? now
     let managerParticipant = SectionMember(
         accountID: defaultManagerDemoProfile().accountID,
         name: defaultManagerDemoProfile().name,
@@ -867,8 +921,8 @@ func defaultLeadershipDemoSection() -> ManagerSection {
         role: .foreman,
         isOnSite: true,
         todos: [
-            MemberTodo(title: "Finalize today's steel erection sequencing plan", dueDate: Date()),
-            MemberTodo(title: "Confirm inspection sign-off for level 3 deck placement", dueDate: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date())
+            MemberTodo(title: "Finalize today's steel erection sequencing plan", dueDate: midMorning),
+            MemberTodo(title: "Confirm inspection sign-off for level 3 deck placement", dueDate: tomorrowMorning)
         ]
     )
     let superintendent = SectionMember(
@@ -900,9 +954,16 @@ func defaultLeadershipDemoSection() -> ManagerSection {
             SectionTask(
                 title: "Coordinate steel delivery, crane window, and level 3 access plan",
                 priority: .high,
-                dueDate: Date(),
+                dueDate: midMorning,
                 assigneeIDs: [managerParticipant.id],
                 managerNotes: "Confirm laydown yard routing, crane availability, and inspector timing before the noon production meeting."
+            ),
+            SectionTask(
+                title: "Review afternoon hoisting permit updates",
+                priority: .medium,
+                dueDate: lateAfternoon,
+                assigneeIDs: [managerParticipant.id, superintendent.id],
+                managerNotes: "Make sure the updated permit notes are shared with the superintendent before the final pick."
             )
         ]
     )
@@ -1123,7 +1184,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
     let translations: [String: String] = [
         "Crew Lead": "Jefe de cuadrilla",
         "Worker": "Cuadrilla",
-        "Crew": "Cuadrilla",
+        "Crew Member": "Miembro de cuadrilla",
         "Open ARCVisor": "Abrir ARCVisor",
         "Welcome to": "Bienvenido a",
         "Demo Mode": "Modo demo",
@@ -1143,22 +1204,24 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Create password": "Crear contraseña",
         "Email (optional)": "Correo (opcional)",
         "I am a": "Soy",
-        "Section Access": "Acceso a sección",
-        "Section code word": "Código de sección",
+        "Crew Access": "Acceso a cuadrilla",
+        "Crew code word": "Código de cuadrilla",
         "Password": "Contraseña",
         "No sections exist yet. Ask your crew lead to create one and share its code word.": "Todavía no hay secciones. Pídele a tu jefe de cuadrilla que cree una y comparta su código.",
         "Enter the section code word from your crew lead to join the right crew.": "Ingresa el código de sección de tu jefe de cuadrilla para unirte al equipo correcto.",
-        "Sections": "Secciones",
-        "Managed Sections": "Secciones administradas",
-        "Leadership Sections": "Secciones de liderazgo",
-        "Subsections": "Subsecciones",
-        "No managed sections yet. Tap + to create one.": "Todavía no hay secciones administradas. Toca + para crear una.",
-        "No subsections yet.": "Todavía no hay subsecciones.",
-        "No leadership sections joined yet.": "Todavía no te has unido a secciones de liderazgo.",
-        "Show Subsections": "Mostrar subsecciones",
-        "Create Subsection": "Crear subsección",
-        "New Subsection": "Nueva subsección",
-        "Subsection name": "Nombre de la subsección",
+        "Crew": "Cuadrilla",
+        "Crews": "Cuadrillas",
+        "crews": "cuadrillas",
+        "Managed Crews": "Cuadrillas administradas",
+        "Leadership Crews": "Cuadrillas de liderazgo",
+        "Sub-crews": "Subcuadrillas",
+        "No managed crews yet. Tap + to create one.": "Todavía no hay cuadrillas administradas. Toca + para crear una.",
+        "No sub-crews yet.": "Todavía no hay subcuadrillas.",
+        "No leadership crews joined yet.": "Todavía no te has unido a cuadrillas de liderazgo.",
+        "Show Sub-crews": "Mostrar subcuadrillas",
+        "Create Sub-crew": "Crear subcuadrilla",
+        "New Sub-crew": "Nueva subcuadrilla",
+        "Sub-crew name": "Nombre de la subcuadrilla",
         "Join Boss Section": "Unirse a la sección del jefe",
         "Join Section": "Unirse a la sección",
         "Boss": "Jefe",
@@ -1171,7 +1234,7 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Profile": "Perfil",
         "Role: Crew Lead": "Rol: Jefe de cuadrilla",
         "Role: Worker": "Rol: Cuadrilla",
-        "Role: Crew": "Rol: Cuadrilla",
+        "Role: Crew Member": "Rol: Miembro de cuadrilla",
         "Account ID": "ID de cuenta",
         "Phone": "Teléfono",
         "Email": "Correo",
@@ -1204,12 +1267,12 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "No leadership to-dos assigned yet.": "Todavía no hay tareas de liderazgo asignadas.",
         "My To-Do": "Mi tarea",
         "Personal To-Dos": "Tareas personales",
-        "Section Task": "Tarea de sección",
+        "Crew Task": "Tarea de cuadrilla",
         "Personal To-Do": "Tarea personal",
         "Chats": "Chats",
         "Read Only": "Solo lectura",
-        "Section": "Sección",
-        "Section Membership": "Membresía de sección",
+        "Crew": "Cuadrilla",
+        "Crew Membership": "Membresía de cuadrilla",
         "Code Word": "Código",
         "From": "De",
         "Today": "Hoy",
@@ -1232,27 +1295,34 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "No crews have joined this section yet.": "Todavía no se han unido cuadrillas a esta sección.",
         "On Site": "En obra",
         "Off Site": "Fuera de obra",
-        "Section tasks": "Tareas de la sección",
+        "Crew tasks": "Tareas de la cuadrilla",
         "Personal to-dos": "Tareas personales",
         "Completed": "Completado",
         "Group Chats": "Chats grupales",
         "No group chats yet. Tap + to create one.": "Todavía no hay chats grupales. Toca + para crear uno.",
-        "Section Tasks": "Tareas de la sección",
+        "Crew Tasks": "Tareas de la cuadrilla",
         "Assign Task": "Asignar tarea",
         "To Verify": "Por verificar",
         "No section tasks yet.": "Todavía no hay tareas de sección.",
         "Task View": "Vista de tareas",
+        "Search tasks": "Buscar tareas",
+        "Search crew members": "Buscar miembros de cuadrilla",
+        "No matching tasks.": "No hay tareas coincidentes.",
+        "No matching crew members.": "No hay miembros de cuadrilla coincidentes.",
+        "Month": "Mes",
+        "Day": "Día",
         "Calendar": "Calendario",
         "No tasks on this date.": "No hay tareas en esta fecha.",
+        "No tasks on this day.": "No hay tareas en este día.",
         "Week Of": "Semana de",
         "No tasks in this week.": "No hay tareas en esta semana.",
-        "Section Details": "Detalles de la sección",
-        "Section name": "Nombre de la sección",
-        "Save Section Details": "Guardar detalles de la sección",
+        "Crew Details": "Detalles de la cuadrilla",
+        "Crew name": "Nombre de la cuadrilla",
+        "Save Crew Details": "Guardar detalles de la cuadrilla",
         "That code word is already being used by another section.": "Ese código ya está siendo usado por otra sección.",
-        "Section details saved.": "Detalles de la sección guardados.",
-        "Section Settings": "Configuración de la sección",
-        "Section Features": "Funciones de la sección",
+        "Crew details saved.": "Detalles de la cuadrilla guardados.",
+        "Crew Settings": "Configuración de la cuadrilla",
+        "Crew Features": "Funciones de la cuadrilla",
         "Enable Time Clock": "Activar reloj",
         "Enable Group Chats": "Activar chats grupales",
         "Enable Section Tasks": "Activar tareas de la sección",
@@ -1320,6 +1390,8 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "No to-dos assigned yet.": "Todavía no hay tareas asignadas.",
         "To-Do View": "Vista de tareas",
         "No to-dos on this date.": "No hay tareas en esta fecha.",
+        "No to-dos on this day.": "No hay tareas en este día.",
+        "No to-dos in this week.": "No hay tareas en esta semana.",
         "Delete": "Eliminar",
         "Assign To-Do on Calendar": "Asignar tarea en el calendario",
         "To-do item": "Tarea",
@@ -1329,9 +1401,9 @@ func localized(_ text: String, _ language: AppLanguage) -> String {
         "Remove Members": "Eliminar miembros",
         "Remove": "Eliminar",
         "No members in this section.": "No hay miembros en esta sección.",
-        "No subsections assigned.": "No hay subsecciones asignadas.",
+        "No sub-crews assigned.": "No hay subcuadrillas asignadas.",
         "Done": "Listo",
-        "Section not found.": "Sección no encontrada.",
+        "Crew not found.": "Cuadrilla no encontrada.",
         "Augmented Reality Construction Visor": "Visor de construcción de realidad aumentada",
         "Siri & Shortcuts": "Siri y Atajos",
         "Use Siri or the Shortcuts app to run ARCLink actions like adding a personal to-do.": "Usa Siri o la app Atajos para ejecutar acciones de ARCLink, como agregar una tarea personal.",
@@ -2159,7 +2231,7 @@ struct AssignTaskToCrewMemberIntent: AppIntent {
     @Parameter(title: "Due Date")
     var dueDate: Date?
 
-    @Parameter(title: "Section Name")
+    @Parameter(title: "Crew Name")
     var sectionName: String?
 
     static var parameterSummary: some ParameterSummary {
@@ -2211,8 +2283,8 @@ struct SendEmergencyEvacuateIntent: AppIntent {
             return .result(dialog: "I couldn't find any connected sections for this account.")
         }
 
-        let sectionLabel = updatedCount == 1 ? "section" : "sections"
-        return .result(dialog: IntentDialog("Sent the emergency evacuate alert to \(updatedCount) \(sectionLabel)."))
+        let crewLabel = updatedCount == 1 ? "crew" : "crews"
+        return .result(dialog: IntentDialog("Sent the emergency evacuate alert to \(updatedCount) \(crewLabel)."))
     }
 }
 
@@ -2221,7 +2293,7 @@ struct SendBreakTimeIntent: AppIntent {
     static let description = IntentDescription("Sends a break-time alert to one managed ARCLink section.")
     static let openAppWhenRun = false
 
-    @Parameter(title: "Section Name")
+    @Parameter(title: "Crew Name")
     var sectionName: String?
 
     static var parameterSummary: some ParameterSummary {
