@@ -819,7 +819,6 @@ struct ManagerHomeView: View {
                 sendEmergencyEvacuate()
             } label: {
                 Label("Emergency Evacuate", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)

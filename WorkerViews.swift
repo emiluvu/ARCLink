@@ -578,7 +578,6 @@ struct WorkerHomeView: View {
                 sendEmergencyEvacuate()
             } label: {
                 Label("Emergency Evacuate", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
@@ -901,15 +900,6 @@ public struct ARCVisorHubView: View {
                 ).foregroundStyle(connectionStatusColor)
 
                 if bluetoothManager.isConnected() {
-                    if let batteryLevel = latestVisorReading?.battery {
-                        HStack {
-                            Text(localized("Visor Battery", language))
-                            Spacer()
-                            Text("\(Int(batteryLevel.rounded()))%")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
                     if let payload = latestVisorPayload {
                         Text(payload)
                             .font(.caption)

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		458018CC2FC6054F00AE9024 /* FieldwireAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 458018CB2FC6054300AE9024 /* FieldwireAPIClient.swift */; };
 		459FDAD02F86000F00333FB3 /* BluetoothManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459FDACF2F86000F00333FB3 /* BluetoothManager.swift */; };
 		45D584BF2F6004F400901DBF /* AppModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D584BB2F6004F400901DBF /* AppModels.swift */; };
 		45D584C02F6004F400901DBF /* AppSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D584BC2F6004F400901DBF /* AppSupport.swift */; };
@@ -18,6 +19,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		458018CB2FC6054300AE9024 /* FieldwireAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FieldwireAPIClient.swift; sourceTree = "<group>"; };
 		459FDACF2F86000F00333FB3 /* BluetoothManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BluetoothManager.swift; sourceTree = "<group>"; };
 		45D584BB2F6004F400901DBF /* AppModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModels.swift; sourceTree = "<group>"; };
 		45D584BC2F6004F400901DBF /* AppSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSupport.swift; sourceTree = "<group>"; };
@@ -52,6 +54,7 @@
 		45E0AF292F5FB9FF00E75C28 = {
 			isa = PBXGroup;
 			children = (
+				458018CB2FC6054300AE9024 /* FieldwireAPIClient.swift */,
 				F67393CE2F63A92B00E5508A /* ARCLink-Info.plist */,
 				45D584BB2F6004F400901DBF /* AppModels.swift */,
 				45D584BC2F6004F400901DBF /* AppSupport.swift */,
@@ -154,6 +157,7 @@
 				45D584C12F6004F400901DBF /* AuthViews.swift in Sources */,
 				45D584C52F6006C500901DBF /* ManagerViews.swift in Sources */,
 				45D584C62F6006C500901DBF /* WorkerViews.swift in Sources */,
+				458018CC2FC6054F00AE9024 /* FieldwireAPIClient.swift in Sources */,
 				459FDAD02F86000F00333FB3 /* BluetoothManager.swift in Sources */,
 				45D584C22F6004F400901DBF /* ContentView.swift in Sources */,
 			);

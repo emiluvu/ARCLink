@@ -453,6 +453,10 @@ struct SectionTask: Identifiable, Codable {
     var managerNotes: String
     var doneMemberIDs: [UUID]
     var verifiedMemberIDs: [UUID]
+    var externalSource: String?
+    var externalTaskID: String?
+    var externalProjectID: String?
+    var lastSyncedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -468,7 +472,11 @@ struct SectionTask: Identifiable, Codable {
         assigneeIDs: [UUID],
         managerNotes: String = "",
         doneMemberIDs: [UUID] = [],
-        verifiedMemberIDs: [UUID] = []
+        verifiedMemberIDs: [UUID] = [],
+        externalSource: String? = nil,
+        externalTaskID: String? = nil,
+        externalProjectID: String? = nil,
+        lastSyncedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -484,6 +492,10 @@ struct SectionTask: Identifiable, Codable {
         self.managerNotes = managerNotes
         self.doneMemberIDs = doneMemberIDs
         self.verifiedMemberIDs = verifiedMemberIDs
+        self.externalSource = externalSource
+        self.externalTaskID = externalTaskID
+        self.externalProjectID = externalProjectID
+        self.lastSyncedAt = lastSyncedAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -502,6 +514,10 @@ struct SectionTask: Identifiable, Codable {
         case doneMemberIDs
         case verifiedMemberIDs
         case completedMemberIDs
+        case externalSource
+        case externalTaskID
+        case externalProjectID
+        case lastSyncedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -521,6 +537,10 @@ struct SectionTask: Identifiable, Codable {
         let legacyCompletedMemberIDs = try container.decodeIfPresent([UUID].self, forKey: .completedMemberIDs) ?? []
         doneMemberIDs = try container.decodeIfPresent([UUID].self, forKey: .doneMemberIDs) ?? legacyCompletedMemberIDs
         verifiedMemberIDs = try container.decodeIfPresent([UUID].self, forKey: .verifiedMemberIDs) ?? legacyCompletedMemberIDs
+        externalSource = try container.decodeIfPresent(String.self, forKey: .externalSource)
+        externalTaskID = try container.decodeIfPresent(String.self, forKey: .externalTaskID)
+        externalProjectID = try container.decodeIfPresent(String.self, forKey: .externalProjectID)
+        lastSyncedAt = try container.decodeIfPresent(Date.self, forKey: .lastSyncedAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -539,6 +559,10 @@ struct SectionTask: Identifiable, Codable {
         try container.encode(managerNotes, forKey: .managerNotes)
         try container.encode(doneMemberIDs, forKey: .doneMemberIDs)
         try container.encode(verifiedMemberIDs, forKey: .verifiedMemberIDs)
+        try container.encodeIfPresent(externalSource, forKey: .externalSource)
+        try container.encodeIfPresent(externalTaskID, forKey: .externalTaskID)
+        try container.encodeIfPresent(externalProjectID, forKey: .externalProjectID)
+        try container.encodeIfPresent(lastSyncedAt, forKey: .lastSyncedAt)
     }
 }
 

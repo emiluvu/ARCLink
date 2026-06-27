@@ -687,16 +687,16 @@ private struct FieldwireDemoSandboxView: View {
         }
     }
 
-    private struct FieldwireProject: Identifiable, Hashable {
+    private struct SampleFieldwireProject: Identifiable, Hashable {
         let id = UUID()
         let name: String
         let region: String
         let crewName: String
         let status: String
-        let tasks: [FieldwireTask]
+        let tasks: [SampleFieldwireTask]
     }
 
-    private struct FieldwireTask: Identifiable, Hashable {
+    private struct SampleFieldwireTask: Identifiable, Hashable {
         let id = UUID()
         let title: String
         let assignee: String
@@ -712,22 +712,40 @@ private struct FieldwireDemoSandboxView: View {
         let destinationCrew: String
         let assigneeMatch: String
         let notes: String
+        let externalTaskID: String?
+
+        var assignmentKey: String {
+            externalTaskID ?? title
+        }
     }
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("managerSectionsJSON", store: demoAppStorage) private var managerSectionsRaw = ""
+    @AppStorage("fieldwireDemoToken", store: demoAppStorage) private var storedFieldwireDemoToken = ""
+    @AppStorage("fieldwireDemoProjectID", store: demoAppStorage) private var storedFieldwireDemoProjectID = ""
     @State private var selectedPanel: SandboxPanel = .overview
-    @State private var selectedProjectID: UUID?
+    @State private var selectedProjectID: String?
+    @State private var selectedDestinationSectionID: UUID?
+    @State private var fieldwireTokenInput = ""
+    @State private var manualProjectIDInput = ""
     @State private var hasLoadedSampleImport = false
     @State private var lastSandboxSync: Date?
+    @State private var isConnectingToFieldwire = false
+    @State private var fieldwireProjects: [FieldwireProject] = []
+    @State private var fieldwireStatuses: [FieldwireStatus] = []
+    @State private var fieldwireTasks: [FieldwireTaskLive] = []
+    @State private var importedARCLinkTasks: [ARCLinkMappedTask] = []
+    @State private var fieldwireConnectionError = ""
+    @State private var selectedAssigneeIDsByTaskKey: [String: Set<UUID>] = [:]
 
-    private let sampleProjects: [FieldwireProject] = [
-        FieldwireProject(
+    private let sampleProjects: [SampleFieldwireProject] = [
+        SampleFieldwireProject(
             name: "Tower A Podium Concrete",
             region: "US",
             crewName: "Concrete Crew",
             status: "Ready for sandbox import",
             tasks: [
-                FieldwireTask(
+                SampleFieldwireTask(
                     title: "Confirm pump truck access route",
                     assignee: "Maya Chen",
                     dueLabel: "Today 8:30 AM",
@@ -735,7 +753,7 @@ private struct FieldwireDemoSandboxView: View {
                     priority: "Medium",
                     checklistCount: 3
                 ),
-                FieldwireTask(
+                SampleFieldwireTask(
                     title: "Finalize slab prep for afternoon pour",
                     assignee: "Luis Martinez",
                     dueLabel: "Tomorrow 3:30 PM",
@@ -743,7 +761,7 @@ private struct FieldwireDemoSandboxView: View {
                     priority: "High",
                     checklistCount: 5
                 ),
-                FieldwireTask(
+                SampleFieldwireTask(
                     title: "Review barricade placement before pour",
                     assignee: "Arjun Patel",
                     dueLabel: "Today 12:00 PM",
@@ -753,13 +771,13 @@ private struct FieldwireDemoSandboxView: View {
                 )
             ]
         ),
-        FieldwireProject(
+        SampleFieldwireProject(
             name: "Steel Erection Phase 3",
             region: "US",
             crewName: "Structural Crew",
             status: "Ready for sandbox import",
             tasks: [
-                FieldwireTask(
+                SampleFieldwireTask(
                     title: "Coordinate crane window and delivery lane",
                     assignee: "Dana Brooks",
                     dueLabel: "Today 10:00 AM",
@@ -767,7 +785,7 @@ private struct FieldwireDemoSandboxView: View {
                     priority: "High",
                     checklistCount: 4
                 ),
-                FieldwireTask(
+                SampleFieldwireTask(
                     title: "Review afternoon hoisting permit updates",
                     assignee: "Jordan Kim",
                     dueLabel: "Today 4:00 PM",
@@ -779,34 +797,96 @@ private struct FieldwireDemoSandboxView: View {
         )
     ]
 
-    private var selectedProject: FieldwireProject? {
+    private var selectedSampleProject: SampleFieldwireProject? {
         if let selectedProjectID {
-            return sampleProjects.first(where: { $0.id == selectedProjectID })
+            return sampleProjects.first(where: { $0.id.uuidString == selectedProjectID })
         }
         return sampleProjects.first
     }
 
+    private var selectedLiveProject: FieldwireProject? {
+        guard let selectedProjectID else { return nil }
+        return fieldwireProjects.first(where: { $0.id == selectedProjectID })
+    }
+
+    private var activeProjectID: String? {
+        if let liveProject = selectedLiveProject {
+            return liveProject.id
+        }
+
+        let cleanedManualID = manualProjectIDInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanedManualID.isEmpty {
+            return cleanedManualID
+        }
+
+        return nil
+    }
+
+    private var destinationCrewName: String {
+        if let destinationSection = destinationSection {
+            return destinationSection.name
+        }
+        if let liveProject = selectedLiveProject {
+            return liveProject.name
+        }
+        return "Unassigned ARCLink Crew"
+    }
+
+    private var destinationMembers: [SectionMember] {
+        destinationSection?.members.sorted { $0.name < $1.name } ?? []
+    }
+
+    private var destinationSections: [ManagerSection] {
+        decodeSections(from: managerSectionsRaw)
+            .filter { $0.parentSectionID == nil }
+            .sorted { $0.name < $1.name }
+    }
+
+    private var destinationSection: ManagerSection? {
+        guard let selectedDestinationSectionID else { return destinationSections.first }
+        return destinationSections.first(where: { $0.id == selectedDestinationSectionID }) ?? destinationSections.first
+    }
+
     private var mappedTasks: [ARCLinkMappedTask] {
-        guard let selectedProject else { return [] }
-        return selectedProject.tasks.map { task in
+
+        if !fieldwireTasks.isEmpty {
+
+            return fieldwireTasks.map { task in
+
+                ARCLinkMappedTask(
+                    title: task.displayTitle,
+                    destinationCrew: destinationCrewName,
+                    assigneeMatch: task.ownerUserID.map {
+                        "Fieldwire user \($0)"
+                    } ?? "No assignee",
+                    notes: statusName(for: task.statusID),
+                    externalTaskID: task.id
+                )
+            }
+        }
+
+        guard let selectedSampleProject else { return [] }
+
+        return selectedSampleProject.tasks.map { task in
+
             ARCLinkMappedTask(
                 title: task.title,
-                destinationCrew: selectedProject.crewName,
+                destinationCrew: selectedSampleProject.crewName,
                 assigneeMatch: task.assignee,
-                notes: "\(task.location) • \(task.priority) priority • \(task.checklistCount) checklist items"
+                notes: "\(task.location) • \(task.priority) priority • \(task.checklistCount) checklist items",
+                externalTaskID: nil
             )
         }
     }
-
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Fieldwire Demo Sandbox")
                         .font(.title3.weight(.semibold))
-                    Text("This page is isolated from the rest of ARCLink. It only previews how a read-only Fieldwire import could flow into ARCLink crews and tasks.")
+                    Text("This page is the Fieldwire integration workspace for ARCLink. Use it to connect to Fieldwire, map tasks to an ARCLink crew, assign members, and import them into the app.")
                         .foregroundStyle(.secondary)
-                    Text("No live API calls. No data is written into ARCLink storage.")
+                    Text("Live API calls only happen when you provide a token here. Imported tasks are manually written into the destination ARCLink crew you choose on this page.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -841,7 +921,14 @@ private struct FieldwireDemoSandboxView: View {
             }
         }
         .onAppear {
-            selectedProjectID = selectedProjectID ?? sampleProjects.first?.id
+            if fieldwireTokenInput.isEmpty {
+                fieldwireTokenInput = storedFieldwireDemoToken
+            }
+            if manualProjectIDInput.isEmpty {
+                manualProjectIDInput = storedFieldwireDemoProjectID
+            }
+            selectedProjectID = selectedProjectID ?? sampleProjects.first?.id.uuidString
+            selectedDestinationSectionID = selectedDestinationSectionID ?? destinationSections.first?.id
         }
     }
 
@@ -870,73 +957,163 @@ private struct FieldwireDemoSandboxView: View {
 
     @ViewBuilder
     private var importPreviewSection: some View {
-        Section("Sandbox Controls") {
-            Picker("Sample Project", selection: Binding(
-                get: { selectedProject?.id ?? sampleProjects.first?.id ?? UUID() },
-                set: { selectedProjectID = $0 }
-            )) {
-                ForEach(sampleProjects) { project in
-                    Text(project.name).tag(project.id)
-                }
-            }
-
-            Button(hasLoadedSampleImport ? "Run Sample Import Again" : "Run Sample Import") {
-                hasLoadedSampleImport = true
-                lastSandboxSync = Date()
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.arcAccentOrange)
-
-            if let lastSandboxSync {
-                Text("Last sandbox import: \(lastSandboxSync.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-
-        if let selectedProject {
-            Section("Imported Project") {
-                labeledValueRow(title: "Project", value: selectedProject.name)
-                labeledValueRow(title: "Mapped Crew", value: selectedProject.crewName)
-                labeledValueRow(title: "Region", value: selectedProject.region)
-                labeledValueRow(title: "Status", value: selectedProject.status)
-                labeledValueRow(title: "Tasks", value: "\(selectedProject.tasks.count)")
-            }
-
-            Section("Fieldwire Tasks") {
-                ForEach(selectedProject.tasks) { task in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(task.title)
-                                .font(.headline)
-                            Spacer()
-                            Text(task.priority)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.arcAccentOrange.opacity(0.12), in: Capsule())
-                        }
-                        Text("Assignee: \(task.assignee)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Due: \(task.dueLabel)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Location: \(task.location)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Section("Fieldwire Connection") {
+                SecureField("Fieldwire API token", text: $fieldwireTokenInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onChange(of: fieldwireTokenInput) {
+                        storedFieldwireDemoToken = fieldwireTokenInput
                     }
-                    .padding(.vertical, 2)
+
+                Button(isConnectingToFieldwire ? "Connecting..." : "Fetch Fieldwire Projects") {
+                    Task {
+                        await fetchLiveProjects()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(isConnectingToFieldwire || fieldwireTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if !fieldwireProjects.isEmpty {
+                    Picker("Live Project", selection: Binding(
+                        get: { selectedLiveProject?.id ?? fieldwireProjects.first?.id ?? "" },
+                        set: { selectedProjectID = $0 }
+                    )) {
+                        ForEach(fieldwireProjects) { project in
+                            Text(project.name).tag(project.id)
+                        }
+                    }
+                } else {
+                    TextField("Manual project ID", text: $manualProjectIDInput)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: manualProjectIDInput) {
+                            storedFieldwireDemoProjectID = manualProjectIDInput
+                        }
+                }
+
+                Button(isConnectingToFieldwire ? "Loading Tasks..." : "Fetch Project Statuses and Tasks") {
+                    Task {
+                        await fetchProjectDetails()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    isConnectingToFieldwire ||
+                    fieldwireTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    activeProjectID == nil
+                )
+
+                if !fieldwireConnectionError.isEmpty {
+                    Text(fieldwireConnectionError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                if let lastSandboxSync {
+                    Text("Last Fieldwire sync: \(lastSandboxSync.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+
+            Section("ARCLink Destination") {
+                if destinationSections.isEmpty {
+                    Text("No ARCLink crews are available to receive imported tasks.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Destination Crew", selection: Binding(
+                        get: { selectedDestinationSectionID ?? destinationSections.first?.id ?? UUID() },
+                        set: { selectedDestinationSectionID = $0 }
+                    )) {
+                        ForEach(destinationSections) { section in
+                            Text(section.name).tag(section.id)
+                        }
+                    }
+                }
+            }
+
+            if !fieldwireProjects.isEmpty {
+                Section("Live Fieldwire Projects") {
+                    ForEach(fieldwireProjects) { project in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(project.name)
+                                .font(.headline)
+                            Text("Project ID: \(project.id)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
+            if !fieldwireStatuses.isEmpty {
+                Section("Live Fieldwire Statuses") {
+                    ForEach(fieldwireStatuses) { status in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(status.name)
+                                    .font(.headline)
+
+                                if let ordinal = status.ordinal {
+                                    Text("Status order: \(ordinal)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Spacer()
+
+                            Circle()
+                                .fill(colorFromHex(status.color ?? "#888888"))
+                                .frame(width: 14, height: 14)
+                        }
+                    }
+                }
+            }
+
+            if !fieldwireTasks.isEmpty {
+                Section("Live Fieldwire Tasks") {
+                    ForEach(fieldwireTasks) { task in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(task.displayTitle)
+                                .font(.headline)
+
+                            Text(statusName(for: task.statusID))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if let ownerUserID = task.ownerUserID {
+                                Text("Assigned in Fieldwire • User \(ownerUserID)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
+                Section("ARCLink Import Preview") {
+                    Button("Preview ARCLink Task Mapping") {
+                        hasLoadedSampleImport = true
+                        importedARCLinkTasks = []
+                        seedAssignmentSelectionsIfNeeded()
+                        selectedPanel = .mapping
+                        lastSandboxSync = Date()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.arcAccentOrange)
+                }
+                
+            }
         }
-    }
 
     @ViewBuilder
     private var mappingSection: some View {
         if !hasLoadedSampleImport {
             Section {
-                Text("Run the sample import first to preview how Fieldwire tasks would map into ARCLink.")
+                Text("Fetch live Fieldwire tasks or use the sample import preview first.")
                     .foregroundStyle(.secondary)
             }
         } else {
@@ -954,8 +1131,73 @@ private struct FieldwireDemoSandboxView: View {
                         Text(task.notes)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        if let destinationSection {
+                            DisclosureGroup("Assign to \(destinationSection.name) members") {
+                                if destinationMembers.isEmpty {
+                                    Text("No members are in this crew yet.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(destinationMembers) { member in
+                                        Button {
+                                            toggleAssignee(member.id, for: task.assignmentKey)
+                                        } label: {
+                                            HStack {
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(member.name)
+                                                    Text(member.roleDisplayTitle)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Spacer()
+                                                Image(systemName: selectedAssigneeIDs(for: task.assignmentKey).contains(member.id) ? "checkmark.circle.fill" : "circle")
+                                                    .foregroundStyle(selectedAssigneeIDs(for: task.assignmentKey).contains(member.id) ? .green : .secondary)
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     .padding(.vertical, 2)
+                }
+                Button("Import into ARCLink Demo") {
+                    importMappedTasksIntoARCLink()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.arcAccentOrange)
+                .disabled(fieldwireTasks.isEmpty || destinationSection == nil)
+                .padding(.top, 8)
+                
+                if !importedARCLinkTasks.isEmpty {
+
+                    Section("Imported into ARCLink Demo") {
+
+                        ForEach(importedARCLinkTasks) { task in
+
+                            VStack(alignment: .leading, spacing: 6) {
+
+                                Text(task.title)
+                                    .font(.headline)
+
+                                Text("Crew: \(task.destinationCrew)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Text("Assignee: \(task.assigneeMatch)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Text(task.notes)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
                 }
             }
 
@@ -965,6 +1207,159 @@ private struct FieldwireDemoSandboxView: View {
                 Text("Keep comments, forms, and photos read-only until conflict rules are defined.")
             }
         }
+    }
+    
+    private func statusName(for statusID: String?) -> String {
+        guard let statusID else {
+            return "No Fieldwire status"
+        }
+
+        if let status = fieldwireStatuses.first(where: { $0.id == statusID }) {
+            return "Fieldwire status: \(status.name)"
+        }
+
+        return "Fieldwire status ID: \(statusID)"
+    }
+
+    private func importMappedTasksIntoARCLink() {
+        guard let destinationSection = destinationSection else { return }
+
+        var sections = decodeSections(from: managerSectionsRaw)
+        guard let sectionIndex = sections.firstIndex(where: { $0.id == destinationSection.id }) else { return }
+
+        let syncDate = Date()
+        let activeExternalProjectID = activeProjectID
+
+        for mappedTask in mappedTasks {
+            let externalTaskID = mappedTask.externalTaskID
+            let assigneeIDs = Array(selectedAssigneeIDs(for: mappedTask.assignmentKey))
+
+            if let externalTaskID,
+               let existingTaskIndex = sections[sectionIndex].sectionTasks.firstIndex(where: {
+                   $0.externalSource == "fieldwire" &&
+                   $0.externalTaskID == externalTaskID
+               }) {
+                sections[sectionIndex].sectionTasks[existingTaskIndex].title = mappedTask.title
+                sections[sectionIndex].sectionTasks[existingTaskIndex].assigneeIDs = assigneeIDs
+                sections[sectionIndex].sectionTasks[existingTaskIndex].managerNotes = mappedTask.notes
+                sections[sectionIndex].sectionTasks[existingTaskIndex].externalProjectID = activeExternalProjectID
+                sections[sectionIndex].sectionTasks[existingTaskIndex].lastSyncedAt = syncDate
+            } else {
+                let importedTask = SectionTask(
+                    title: mappedTask.title,
+                    descriptionText: "Imported from Fieldwire.",
+                    priority: .medium,
+                    dueDate: syncDate,
+                    siteName: destinationSection.name,
+                    locationDetails: "",
+                    requiresAcknowledgement: false,
+                    assigneeIDs: assigneeIDs,
+                    managerNotes: mappedTask.notes,
+                    externalSource: "fieldwire",
+                    externalTaskID: externalTaskID,
+                    externalProjectID: activeExternalProjectID,
+                    lastSyncedAt: syncDate
+                )
+                sections[sectionIndex].sectionTasks.append(importedTask)
+            }
+        }
+
+        managerSectionsRaw = encodeSections(sections)
+        importedARCLinkTasks = mappedTasks
+        lastSandboxSync = syncDate
+    }
+
+    private func selectedAssigneeIDs(for taskKey: String) -> Set<UUID> {
+        selectedAssigneeIDsByTaskKey[taskKey] ?? []
+    }
+
+    private func toggleAssignee(_ memberID: UUID, for taskKey: String) {
+        var selections = selectedAssigneeIDs(for: taskKey)
+        if selections.contains(memberID) {
+            selections.remove(memberID)
+        } else {
+            selections.insert(memberID)
+        }
+        selectedAssigneeIDsByTaskKey[taskKey] = selections
+    }
+
+    private func seedAssignmentSelectionsIfNeeded() {
+        for task in mappedTasks {
+            if selectedAssigneeIDsByTaskKey[task.assignmentKey] == nil {
+                selectedAssigneeIDsByTaskKey[task.assignmentKey] = []
+            }
+        }
+    }
+
+    @MainActor
+    private func fetchLiveProjects() async {
+        let cleanedToken = fieldwireTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedToken.isEmpty else { return }
+
+        isConnectingToFieldwire = true
+        fieldwireConnectionError = ""
+        fieldwireProjects = []
+        fieldwireStatuses = []
+        fieldwireTasks = []
+        importedARCLinkTasks = []
+
+        do {
+            let client = FieldwireAPIClient(token: cleanedToken)
+            let projects = try await client.fetchProjects()
+            fieldwireProjects = projects
+            if let firstProject = projects.first {
+                selectedProjectID = firstProject.id
+            }
+        } catch {
+            fieldwireConnectionError = error.localizedDescription
+        }
+
+        isConnectingToFieldwire = false
+    }
+
+    @MainActor
+    private func fetchProjectDetails() async {
+        let cleanedToken = fieldwireTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedToken.isEmpty, let activeProjectID else { return }
+
+        isConnectingToFieldwire = true
+        fieldwireConnectionError = ""
+        fieldwireStatuses = []
+        fieldwireTasks = []
+        importedARCLinkTasks = []
+
+        do {
+            let client = FieldwireAPIClient(token: cleanedToken)
+            async let statuses = client.fetchStatuses(projectID: activeProjectID)
+            async let tasks = client.fetchTasks(projectID: activeProjectID)
+            fieldwireStatuses = try await statuses
+            fieldwireTasks = try await tasks
+            hasLoadedSampleImport = true
+            lastSandboxSync = Date()
+        } catch {
+            fieldwireConnectionError = error.localizedDescription
+        }
+
+        isConnectingToFieldwire = false
+    }
+    
+    private func colorFromHex(_ hex: String) -> Color {
+        var hexFormatted = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        hexFormatted = hexFormatted.replacingOccurrences(
+            of: "#",
+            with: ""
+        )
+
+        var rgb: UInt64 = 0
+
+        Scanner(string: hexFormatted).scanHexInt64(&rgb)
+
+        return Color(
+            red: Double((rgb >> 16) & 0xFF) / 255.0,
+            green: Double((rgb >> 8) & 0xFF) / 255.0,
+            blue: Double(rgb & 0xFF) / 255.0
+        )
     }
 
     private func labeledValueRow(title: String, value: String) -> some View {
